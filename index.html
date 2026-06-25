@@ -410,6 +410,21 @@
                 z-index: -10;
             }
         }
+        /* ===== WARNA AMAN UNTUK html2canvas (Kirim via WhatsApp / buat PDF) =====
+           Tailwind v4 mendefinisikan warnanya pakai format oklch() yang TIDAK dipahami
+           html2canvas. Override ke rgb() literal di bawah ini menjamin warna yang dibaca
+           html2canvas selalu format aman, tanpa mengubah tampilan visual sama sekali
+           (rgb di bawah adalah nilai yang sama persis dengan warna Tailwind aslinya). */
+        #print-area .bg-gray-50 { background-color: rgb(249, 250, 251) !important; }
+        #print-area .bg-white { background-color: rgb(255, 255, 255) !important; }
+        #print-area .border-gray-300 { border-color: rgb(209, 213, 219) !important; }
+        #print-area .border-gray-400 { border-color: rgb(156, 163, 175) !important; }
+        #print-area .text-blue-700 { color: rgb(29, 78, 216) !important; }
+        #print-area .text-gray-500 { color: rgb(107, 114, 128) !important; }
+        #print-area .text-gray-800 { color: rgb(31, 41, 55) !important; }
+        #print-area .text-gray-900 { color: rgb(17, 24, 39) !important; }
+        #print-area .text-green-700 { color: rgb(21, 128, 61) !important; }
+        #print-area .text-white { color: rgb(255, 255, 255) !important; }
     </style>
 </head>
 <body class="md:h-screen w-screen relative text-gray-800 flex flex-col overflow-x-hidden p-2 md:p-4 justify-center items-center">
@@ -1718,6 +1733,42 @@
             }
         }
 
+        // AKAR MASALAH SEBENARNYA: Tailwind v4 mendefinisikan seluruh palet warnanya sebagai
+        // CSS custom property di :root, contoh "--color-gray-800: oklch(...)" - lalu setiap class
+        // utility (text-gray-800, border-gray-300, dst) cuma memanggil var(--color-gray-800).
+        // Jadi yang perlu ditambal bukan elemen satu-satu, tapi VARIABEL-nya di stylesheet,
+        // supaya otomatis berlaku ke semua elemen & pseudo-elemen (termasuk ikon FontAwesome) sekaligus.
+        function tambalVariabelWarnaOklch() {
+            let jumlahDitambal = 0;
+            try {
+                for (const sheet of Array.from(document.styleSheets)) {
+                    let rules;
+                    try { rules = sheet.cssRules; } catch (e) { continue; } // lewati stylesheet cross-origin yang tak bisa dibaca
+                    if (!rules) continue;
+                    for (const rule of Array.from(rules)) {
+                        const style = rule.style;
+                        if (!style) continue;
+                        for (let i = 0; i < style.length; i++) {
+                            const prop = style.item(i);
+                            const nilaiAsli = style.getPropertyValue(prop);
+                            if (nilaiAsli && /oklch|oklab|lch\(|lab\(|color\(/i.test(nilaiAsli)) {
+                                const nilaiBaru = warnaKeRgb(nilaiAsli);
+                                if (nilaiBaru && nilaiBaru !== nilaiAsli) {
+                                    style.setProperty(prop, nilaiBaru, style.getPropertyPriority(prop) || '');
+                                    jumlahDitambal++;
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch (e) {
+                console.warn('Gagal menambal variabel warna oklch:', e);
+            }
+            return jumlahDitambal;
+        }
+
+        // Jaring pengaman tambahan: tambal juga warna inline langsung per-elemen di dalam
+        // hasil clone (kalau ada yang tidak lewat variabel CSS sama sekali).
         function amankanWarnaUntukCanvas(clonedDoc) {
             const root = clonedDoc.getElementById('print-area');
             if (!root) return;
@@ -1735,6 +1786,7 @@
         }
 
         async function buatPdfSurat() {
+            tambalVariabelWarnaOklch(); // tambal dulu di dokumen asli SEBELUM di-clone/screenshot
             const printArea = document.getElementById('print-area');
             const skalaSebelumnya = printArea.style.transform;
             printArea.style.transform = 'scale(1)'; // render ulang di ukuran asli biar tajam
