@@ -10,8 +10,6 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- QRCode.js -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
-    <!-- SheetJS -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
     <!-- html2canvas (untuk fitur Kirim via WhatsApp - render surat jadi gambar) -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
     <!-- Firebase (Auth + Firestore) untuk Login Admin & Verifikasi Online QR -->
@@ -99,6 +97,16 @@
         window.fbDeleteSurat = async (token) => {
             if (!firebaseReady) throw new Error("Firebase belum terhubung.");
             await deleteDoc(doc(db, "surat", token));
+        };
+
+        // Verifikasi ulang password TANPA melakukan aksi apapun - dipakai sebagai gerbang keamanan
+        // sebelum aksi sensitif satuan (misal hapus 1 riwayat surat)
+        window.fbVerifyPassword = async (password) => {
+            if (!firebaseReady) throw new Error("Firebase belum terhubung.");
+            const user = auth.currentUser;
+            if (!user || !user.email) throw new Error("Anda belum login.");
+            await signInWithEmailAndPassword(auth, user.email, password);
+            return true;
         };
 
         // Tes koneksi nyata: berhasil baca dokumen di koleksi 'counters' artinya Auth + Firestore + Rules semuanya aktif
@@ -193,6 +201,10 @@
 
         /* PERBAIKAN TOTAL CETAK HP: Menggunakan metode visibilitas agar browser tidak mendeteksi kertas kosong */
         @media print {
+            @page {
+                size: A4;
+                margin: 0;
+            }
             body, html { 
                 background: white !important; 
                 overflow: visible !important;
@@ -273,14 +285,24 @@
                 display: table-row-group !important;
             }
             #surat-kop-header {
-                padding: 14mm 18mm 4mm 18mm !important;
+                padding: 12mm 18mm 4mm 18mm !important;
             }
             #surat-footer-bottom {
-                padding: 4mm 18mm 10mm 18mm !important;
+                padding: 4mm 18mm 12mm 18mm !important;
             }
             #surat-body-content {
                 padding: 2mm 18mm 6mm 18mm !important;
                 vertical-align: top !important;
+            }
+            /* Hindari baris tabel & blok TTD/QR terpotong di tengah pembagian halaman,
+               supaya kop & footer yang berulang otomatis selalu tampil rapi di setiap halaman */
+            #surat-body-content table tr {
+                page-break-inside: avoid !important;
+                break-inside: avoid !important;
+            }
+            .avoid-break-print {
+                page-break-inside: avoid !important;
+                break-inside: avoid !important;
             }
             /* Spacer untuk menjaga agar footer tidak menimpa konten di halaman terakhir */
             #surat-footer-spacer {
@@ -365,6 +387,24 @@
             <div class="flex gap-2 pt-1">
                 <button onclick="passwordModalBatal()" class="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 py-2 rounded-lg text-sm font-bold">Batal</button>
                 <button onclick="passwordModalKonfirmasi()" class="flex-1 bg-red-600 hover:bg-red-700 text-white py-2 rounded-lg text-sm font-bold">Konfirmasi</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL KONFIRMASI KELUAR APLIKASI (dipicu tombol Back HP, mengikuti tema aplikasi) -->
+    <div id="exit-confirm-modal" class="no-print fixed inset-0 bg-gray-900/80 z-[10000] flex items-center justify-center p-4 hidden">
+        <div class="bg-white rounded-xl shadow-2xl p-5 w-full max-w-sm space-y-3">
+            <div class="flex items-center gap-2">
+                <span class="w-9 h-9 rounded-[10px] bg-[#1E255E] flex items-center justify-center text-white font-black text-sm shrink-0">mb</span>
+                <div>
+                    <h3 class="font-bold text-gray-800 text-sm">Keluar dari Aplikasi?</h3>
+                    <p class="text-[11px] text-gray-400">Sistem Surat CV. Maju Bersama</p>
+                </div>
+            </div>
+            <p id="exit-confirm-msg" class="text-[13px] text-gray-600">Perubahan yang belum disimpan/diterbitkan bisa hilang. Yakin ingin keluar?</p>
+            <div class="flex gap-2 pt-1">
+                <button onclick="exitConfirmBatal()" class="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 py-2 rounded-lg text-sm font-bold">Tetap di Sini</button>
+                <button onclick="exitConfirmSetuju()" class="flex-1 bg-[#1E255E] hover:bg-[#11153B] text-white py-2 rounded-lg text-sm font-bold">Ya, Keluar</button>
             </div>
         </div>
     </div>
@@ -496,6 +536,7 @@
                                     <label class="text-gray-500 block mb-0.5">Tujuan Surat (Kepada Yth,)</label>
                                     <textarea id="in-tujuan" rows="3" class="w-full p-1.5 border border-gray-300 rounded leading-tight" oninput="renderLive()">Kepada Yth,&#10;PT Mandiri Utama Finance / Bpk SAKYAN&#10;Jl manek Roo 8c & 8d Kuta Padang, Kec. Johan Pahlawan&#10;Meulaboh Aceh Barat</textarea>
                                 </div>
+                                <button onclick="simpanPanel('info')" class="w-full bg-gray-600 hover:bg-gray-700 text-white py-1.5 rounded text-[13px] font-bold"><i class="fas fa-save"></i> Simpan sebagai Default</button>
                             </div>
                         </details>
 
@@ -562,13 +603,13 @@
                                     </div>
                                     <p class="text-[12px] text-gray-400 italic">Terbilang otomatis terisi dari angka di atas — boleh diedit manual kalau mau redaksi lain.</p>
                                 </div>
+                                <button onclick="simpanPanel('biaya')" class="w-full bg-gray-600 hover:bg-gray-700 text-white py-1.5 rounded text-[13px] font-bold"><i class="fas fa-save"></i> Simpan sebagai Default</button>
                             </div>
                         </details>
 
-                        <!-- TOMBOL CETAK & EXCEL -->
+                        <!-- TOMBOL CETAK -->
                         <div class="flex gap-2 pt-1">
                             <button onclick="window.print()" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-lg text-xs font-bold shadow transition-all"><i class="fas fa-print"></i> CETAK / PRINT PDF</button>
-                            <button onclick="exportExcel()" class="bg-emerald-600 hover:bg-emerald-700 text-white px-4 rounded-lg text-xs font-bold" title="Ekspor Excel"><i class="fas fa-file-excel text-base"></i></button>
                         </div>
                         <button onclick="kirimViaWhatsApp()" id="btn-whatsapp" class="w-full bg-green-600 hover:bg-green-700 text-white py-2 rounded-lg text-xs font-bold shadow transition-all"><i class="fab fa-whatsapp"></i> Kirim via WhatsApp</button>
                     </div>
@@ -631,17 +672,17 @@
                                             <!-- KOP SURAT ASLI -->
                                             <div class="flex items-center gap-4 pb-1 pl-3">
                                                 <!-- Area Logo Adaptif (Bisa Kotak mb / Gambar Upload) -->
-                                                <div id="logo-wrapper" class="w-[68px] h-[68px] shrink-0 flex items-center justify-center overflow-hidden">
-                                                    <div id="default-logo" class="w-full h-full bg-[#1E255E] rounded-[12px] flex items-center justify-center text-white font-black text-[34px] tracking-tighter select-none">mb</div>
-                                                    <img id="custom-logo" class="hidden w-full h-full object-contain rounded-[12px]" src="" alt="Logo">
+                                                <div id="logo-wrapper" class="w-[92px] h-[92px] shrink-0 flex items-center justify-center overflow-hidden">
+                                                    <div id="default-logo" class="w-full h-full bg-[#1E255E] rounded-[16px] flex items-center justify-center text-white font-black text-[46px] tracking-tighter select-none">mb</div>
+                                                    <img id="custom-logo" class="hidden w-full h-full object-contain rounded-[16px]" src="" alt="Logo">
                                                 </div>
                                                 <div class="flex-1">
-                                                    <h1 id="view-nama-perusahaan" class="text-[32px] font-bold tracking-tight text-[#11153B] font-sans m-0 p-0 leading-none">CV. MAJU BERSAMA</h1>
+                                                    <h1 id="view-nama-perusahaan" class="text-[36px] font-bold tracking-tight text-[#11153B] font-sans m-0 p-0 leading-none">CV. MAJU BERSAMA</h1>
                                                 </div>
                                             </div>
                                             
                                             <!-- Garis Pembatas Kop -->
-                                            <div class="h-[7px] w-full mb-1" style="background: linear-gradient(to right, #9CA3AF 0%, #9CA3AF 46%, #2190BC 46%, #2190BC 62%, #34507C 62%, #34507C 69%, #1E255E 69%, #1E255E 100%);"></div>
+                                            <div class="h-[11px] w-full mb-1" style="background: linear-gradient(to right, #9CA3AF 0%, #9CA3AF 46%, #2190BC 46%, #2190BC 62%, #34507C 62%, #34507C 69%, #1E255E 69%, #1E255E 100%);"></div>
 
                                             <!-- Nomor Surat & Tanggal Berkas (hanya di halaman pertama, di halaman lanjutan tetap muncul garis kop saja) -->
                                             <div class="flex justify-between items-end surat-font font-normal mb-2 text-gray-900">
@@ -678,7 +719,7 @@
                                                         <span id="view-footer-email2" class="text-blue-700 underline">...</span>
                                                     </div>
                                                 </div>
-                                                <div class="h-[10px] w-full mt-1.5" style="background: linear-gradient(to right, #2190BC 0%, #2190BC 38%, #1E255E 38%, #1E255E 100%);"></div>
+                                                <div class="h-[14px] w-full mt-1.5" style="background: linear-gradient(to right, #2190BC 0%, #2190BC 38%, #1E255E 38%, #1E255E 100%);"></div>
                                             </div>
                                         </div>
                                     </td>
@@ -720,7 +761,7 @@
                                         </div>
 
                                         <!-- TANDA TANGAN & QR CODE (di akhir isi surat, sebelum footer) -->
-                                        <div class="mt-6 mb-4">
+                                        <div class="mt-6 mb-4 avoid-break-print">
                                             <div class="flex justify-between items-end pb-2">
                                                 <!-- QR Code Validasi -->
                                                 <div class="flex items-center gap-2 border border-gray-300 p-1 rounded bg-gray-50/40 w-[210px] shadow-sm">
@@ -778,6 +819,7 @@
             buildFormRows('fields-a', initDataA);
             buildFormRows('fields-b', initDataB);
             renderLive();
+            pasangPenjagaBack();
 
             regenerateQRCode("Surat belum diterbitkan secara online - klik 'Simpan & Terbitkan' setelah login & Firebase terhubung.");
 
@@ -953,6 +995,49 @@
             }
         });
         // ====== AKHIR TANDA PERUBAHAN ======
+
+        // ====== KONFIRMASI KELUAR APLIKASI VIA TOMBOL BACK (dialog mengikuti tema, bukan konfirmasi bawaan browser) ======
+        // Trik: selalu ada 1 "state penjaga" di riwayat history. Saat tombol Back/Gesture Back HP ditekan,
+        // browser memicu 'popstate' -> kita TANGKAP dulu, tahan dengan mendorong kembali state penjaga,
+        // lalu tampilkan modal tema sendiri. Aplikasi baru benar-benar keluar/mundur kalau user menekan "Ya, Keluar".
+        let exitGuardAktif = false;
+        let sedangKonfirmasiKeluar = false;
+
+        function pasangPenjagaBack() {
+            history.pushState({ appGuard: true }, '', location.href);
+            exitGuardAktif = true;
+        }
+
+        window.addEventListener('popstate', (e) => {
+            if (sedangKonfirmasiKeluar) return; // sedang proses keluar yang disetujui, biarkan lanjut
+            // Tahan navigasi back: pasang lagi state penjaga, lalu tampilkan modal tema sendiri
+            pasangPenjagaBack();
+            document.getElementById('exit-confirm-msg').textContent = adaPerubahanBelumDisimpan
+                ? 'Ada perubahan surat yang belum disimpan/diterbitkan. Perubahan ini bisa hilang jika keluar sekarang. Yakin ingin keluar?'
+                : 'Perubahan yang belum disimpan/diterbitkan bisa hilang. Yakin ingin keluar?';
+            document.getElementById('exit-confirm-modal').classList.remove('hidden');
+        });
+
+        function exitConfirmBatal() {
+            document.getElementById('exit-confirm-modal').classList.add('hidden');
+        }
+
+        function exitConfirmSetuju() {
+            document.getElementById('exit-confirm-modal').classList.add('hidden');
+            sedangKonfirmasiKeluar = true;
+            // Mundur 2 langkah: 1 untuk melewati state penjaga yang baru dipasang, 1 untuk benar-benar keluar halaman
+            history.go(-2);
+            // Jaga-jaga: kalau ternyata tidak ada riwayat browser lagi untuk dimundurkan (mis. halaman dibuka
+            // langsung tanpa riwayat sebelumnya), browser tidak akan benar-benar pindah. Pasang lagi penjaganya
+            // setelah sesaat supaya tombol Back tetap berfungsi normal untuk percobaan selanjutnya.
+            setTimeout(() => {
+                if (sedangKonfirmasiKeluar) {
+                    sedangKonfirmasiKeluar = false;
+                    pasangPenjagaBack();
+                }
+            }, 600);
+        }
+        // ====== AKHIR KONFIRMASI KELUAR APLIKASI ======
 
         function renderLive() {
             // Tandai ada perubahan yang belum diterbitkan (kecuali saat pertama kali halaman dimuat)
@@ -1174,6 +1259,7 @@
                         <span class="block text-[12px] text-gray-500 truncate">${entry.judul || '(tanpa judul)'} &middot; ${tgl}</span>
                     </div>
                     <button onclick="muatRiwayat(${idx})" class="bg-sky-600 text-white px-2 py-0.5 rounded text-[12px]"><i class="fas fa-eye"></i> Lihat</button>
+                    <button onclick="cetakUlangRiwayat(${idx})" class="bg-indigo-600 text-white px-2 py-0.5 rounded text-[12px]" title="Cetak Ulang / Simpan PDF"><i class="fas fa-print"></i></button>
                     <button onclick="hapusSatuRiwayat(${idx})" class="bg-red-500 text-white px-2 py-0.5 rounded text-[12px]"><i class="fas fa-trash"></i></button>
                 `;
                 container.appendChild(row);
@@ -1191,14 +1277,43 @@
             const entry = riwayatCache[index];
             if (!entry) return;
             if (!confirm(`Hapus riwayat surat "${entry.nomor || '-'}" (${entry.judul || 'tanpa judul'})?\n\nQR di surat fisik yang sudah dicetak tidak akan bisa diverifikasi lagi setelah ini.`)) return;
+            const password = await mintaPasswordModal('Untuk keamanan, masukkan ulang password login Anda sebelum menghapus riwayat surat ini.');
+            if (!password) return;
             try {
+                if (!window.fbVerifyPassword) throw new Error('Modul Firebase belum termuat.');
+                await window.fbVerifyPassword(password);
                 if (!window.fbDeleteSurat) throw new Error('Modul Firebase belum termuat.');
                 await window.fbDeleteSurat(entry.id);
                 await renderRiwayatSurat();
             } catch (e) {
                 console.error(e);
-                alert('Gagal menghapus: ' + e.message);
+                alert('Gagal menghapus: ' + (e.message || 'Password salah atau koneksi gagal.'));
             }
+        }
+
+        // Muat data riwayat ke form TANPA alert/popup - dipakai sebelum cetak ulang
+        function muatRiwayatSenyap(index) {
+            const entry = riwayatCache[index];
+            if (!entry) return null;
+            document.getElementById('in-judul-surat').value = entry.judul || '';
+            document.getElementById('in-nomor-surat').value = entry.nomor || '';
+            isiFormDariData(entry);
+            tokenAktif = entry.id || null;
+            nomorTerakhirDiterbitkan = entry.nomor || null;
+            adaPerubahanBelumDisimpan = false;
+            perbaruiStatusTerbit(true);
+            return entry;
+        }
+
+        // Muat riwayat lalu langsung tampilkan dialog cetak/simpan PDF - untuk cetak ulang surat yang sudah pernah terbit
+        function cetakUlangRiwayat(index) {
+            const entry = muatRiwayatSenyap(index);
+            if (!entry) return;
+            if (window.innerWidth <= 768) switchTab('preview');
+            setTimeout(() => {
+                sesuaikanSkalaPreview();
+                window.print();
+            }, 150);
         }
 
         function muatRiwayat(index) {
@@ -1562,32 +1677,6 @@
         }
         // ====== AKHIR KIRIM VIA WHATSAPP ======
 
-        function exportExcel() {
-            const rowsA = Array.from(document.getElementById('fields-a').querySelectorAll('.dynamic-row')).map(r => [r.querySelector('.f-lbl').value, r.querySelector('.f-val').value]);
-            const rowsB = Array.from(document.getElementById('fields-b').querySelectorAll('.dynamic-row')).map(r => [r.querySelector('.f-lbl').value, r.querySelector('.f-val').value]);
-            
-            const data = [
-                ["KOMPONEN", "DETAIL ESTIMASI SURAT"],
-                ["Judul Surat", document.getElementById('in-judul-surat').value],
-                ["Perusahaan", document.getElementById('in-nama-perusahaan').value],
-                ["Tanggal Berkas", document.getElementById('in-tgl').value],
-                ["Perihal Dokumen", document.getElementById('in-perihal').value],
-                ["Tujuan Pengiriman", document.getElementById('in-tujuan').value],
-                ["[BLOK DATA LAMA]", ""],
-                ...rowsA,
-                ["[BLOK PENGALIHAN BARU]", ""],
-                ...rowsB,
-                ["Estimasi Biaya", document.getElementById('in-biaya-angka').value],
-                ["Terbilang Huruf", document.getElementById('in-biaya-huruf').value],
-                ["Email Kiri", document.getElementById('in-footer-email1').value],
-                ["Email Kanan", document.getElementById('in-footer-email2').value]
-            ];
-
-            const ws = XLSX.utils.aoa_to_sheet(data);
-            const wb = XLSX.utils.book_new();
-            XLSX.utils.book_append_sheet(wb, ws, "Data Surat");
-            XLSX.writeFile(wb, "Surat_Kustom_Sistem.xlsx");
-        }
     </script>
 </body>
 </html>
