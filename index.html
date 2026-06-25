@@ -1699,11 +1699,46 @@
         // ====== AKHIR SIMPAN PER-PANEL ======
 
         // ====== KIRIM VIA WHATSAPP (mengirim FILE PDF ASLI, bukan teks/gambar) ======
+        // html2canvas (1.4.1) belum mendukung format warna modern seperti oklch()/oklab() yang
+        // dipakai Tailwind v4 secara default. Trik: pakai Canvas 2D (yang didukung browser native)
+        // untuk mengonversi warna apapun (termasuk oklch) jadi rgb() yang dipahami html2canvas.
+        function warnaKeRgb(nilai) {
+            if (!nilai || nilai === 'none' || nilai === 'transparent') return nilai;
+            if (!/oklch|oklab|lch\(|lab\(|color\(/i.test(nilai)) return nilai; // sudah format aman
+            try {
+                const c = document.createElement('canvas');
+                c.width = 1; c.height = 1;
+                const ctx = c.getContext('2d');
+                ctx.fillStyle = nilai;
+                ctx.fillRect(0, 0, 1, 1);
+                const d = ctx.getImageData(0, 0, 1, 1).data;
+                return d[3] === 255 ? `rgb(${d[0]}, ${d[1]}, ${d[2]})` : `rgba(${d[0]}, ${d[1]}, ${d[2]}, ${(d[3] / 255).toFixed(3)})`;
+            } catch (e) {
+                return nilai;
+            }
+        }
+
+        function amankanWarnaUntukCanvas(clonedDoc) {
+            const root = clonedDoc.getElementById('print-area');
+            if (!root) return;
+            const semuaElemen = [root, ...root.querySelectorAll('*')];
+            const propertiWarna = ['color', 'backgroundColor', 'borderTopColor', 'borderRightColor', 'borderBottomColor', 'borderLeftColor', 'outlineColor', 'textDecorationColor'];
+            semuaElemen.forEach(el => {
+                const cs = clonedDoc.defaultView.getComputedStyle(el);
+                propertiWarna.forEach(prop => {
+                    const nilaiAsli = cs[prop];
+                    const nilaiBaru = warnaKeRgb(nilaiAsli);
+                    if (nilaiBaru !== nilaiAsli) el.style[prop] = nilaiBaru;
+                });
+                el.style.boxShadow = 'none'; // shadow tidak perlu utk hasil cetak & sering memuat warna oklch juga
+            });
+        }
+
         async function buatPdfSurat() {
             const printArea = document.getElementById('print-area');
             const skalaSebelumnya = printArea.style.transform;
             printArea.style.transform = 'scale(1)'; // render ulang di ukuran asli biar tajam
-            const canvas = await html2canvas(printArea, { scale: 2, useCORS: true, backgroundColor: '#ffffff' });
+            const canvas = await html2canvas(printArea, { scale: 2, useCORS: true, backgroundColor: '#ffffff', onclone: amankanWarnaUntukCanvas });
             printArea.style.transform = skalaSebelumnya;
 
             const { jsPDF } = window.jspdf;
