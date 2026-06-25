@@ -243,7 +243,7 @@
                 width: 210mm !important;
                 min-height: 297mm !important;
                 height: auto !important;
-                padding: 20mm 18mm !important;
+                padding: 0 !important;
                 box-shadow: none !important;
                 border: none !important;
                 transform: scale(1) !important;
@@ -254,6 +254,55 @@
                 height: auto !important;
                 overflow: visible !important;
             }
+
+            /* ===== TEKNIK KOP + FOOTER BERULANG DI SETIAP HALAMAN =====
+               Menggunakan tabel dengan thead/tfoot yang secara otomatis
+               diulang oleh browser/printer di setiap halaman baru. */
+            #surat-print-table {
+                display: table !important;
+                width: 100% !important;
+                border-collapse: collapse !important;
+            }
+            #surat-print-table thead {
+                display: table-header-group !important;
+            }
+            #surat-print-table tfoot {
+                display: table-footer-group !important;
+            }
+            #surat-print-table tbody {
+                display: table-row-group !important;
+            }
+            #surat-kop-header {
+                padding: 14mm 18mm 4mm 18mm !important;
+            }
+            #surat-footer-bottom {
+                padding: 4mm 18mm 10mm 18mm !important;
+            }
+            #surat-body-content {
+                padding: 2mm 18mm 6mm 18mm !important;
+                vertical-align: top !important;
+            }
+            /* Spacer untuk menjaga agar footer tidak menimpa konten di halaman terakhir */
+            #surat-footer-spacer {
+                height: 8mm;
+                display: block;
+            }
+        }
+
+        /* Tampilan layar (preview): tabel kop/footer tidak berulang, padding seperti biasa */
+        #surat-print-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        #surat-kop-header {
+            padding: 2rem 2.5rem 0.5rem 2.5rem;
+        }
+        #surat-footer-bottom {
+            padding: 0.5rem 2.5rem 1.5rem 2.5rem;
+        }
+        #surat-body-content {
+            padding: 0.25rem 2.5rem 1rem 2.5rem;
+            vertical-align: top;
         }
 
         .surat-font {
@@ -569,107 +618,132 @@
                          supaya surat selalu tampil PENUH (tidak terpotong) di lebar layar apapun -->
                     <div id="print-area-wrapper" style="overflow:hidden; position:relative;">
                     <!-- KERTAS SURAT ELEGAN (A4) -->
-                    <div id="print-area" class="w-[210mm] min-h-[297mm] bg-white shadow-2xl p-8 sm:p-12 border border-gray-400 rounded-sm relative flex flex-col justify-between shrink-0 origin-top-left">
+                    <div id="print-area" class="w-[210mm] min-h-[297mm] bg-white shadow-2xl border border-gray-400 rounded-sm relative shrink-0 origin-top-left">
                         
-                        <div>
-                            <!-- KOP SURAT ASLI -->
-                            <div class="flex items-center gap-4 pb-1 pl-3">
-                                <!-- Area Logo Adaptif (Bisa Kotak mb / Gambar Upload) -->
-                                <div id="logo-wrapper" class="w-[68px] h-[68px] shrink-0 flex items-center justify-center overflow-hidden">
-                                    <div id="default-logo" class="w-full h-full bg-[#1E255E] rounded-[12px] flex items-center justify-center text-white font-black text-[34px] tracking-tighter select-none">mb</div>
-                                    <img id="custom-logo" class="hidden w-full h-full object-contain rounded-[12px]" src="" alt="Logo">
-                                </div>
-                                <div class="flex-1">
-                                    <h1 id="view-nama-perusahaan" class="text-[32px] font-bold tracking-tight text-[#11153B] font-sans m-0 p-0 leading-none">CV. MAJU BERSAMA</h1>
-                                </div>
-                            </div>
-                            
-                            <!-- Garis Pembatas Kop (4 segmen: abu-abu, biru muda, biru tua, navy - sesuai KOP asli) -->
-                            <div class="h-[7px] w-full mb-1" style="background: linear-gradient(to right, #9CA3AF 0%, #9CA3AF 46%, #2190BC 46%, #2190BC 62%, #34507C 62%, #34507C 69%, #1E255E 69%, #1E255E 100%);"></div>
+                        <!-- Struktur tabel agar thead (kop) & tfoot (footer) otomatis berulang di setiap halaman PDF -->
+                        <table id="surat-print-table" style="width:100%; border-collapse:collapse;">
 
-                            <!-- Nomor Surat & Tanggal Berkas -->
-                            <div class="flex justify-between items-end surat-font font-normal mb-5 text-gray-900">
-                                <div>Nomor: <span id="view-nomor-surat" class="font-bold">-</span></div>
-                                <div id="view-tgl">Banda Aceh, 24 Juni 2026</div>
-                            </div>
+                            <!-- ===== THEAD: KOP SURAT — BERULANG DI SETIAP HALAMAN ===== -->
+                            <thead>
+                                <tr>
+                                    <td>
+                                        <div id="surat-kop-header" style="padding: 14mm 18mm 4mm 18mm;">
+                                            <!-- KOP SURAT ASLI -->
+                                            <div class="flex items-center gap-4 pb-1 pl-3">
+                                                <!-- Area Logo Adaptif (Bisa Kotak mb / Gambar Upload) -->
+                                                <div id="logo-wrapper" class="w-[68px] h-[68px] shrink-0 flex items-center justify-center overflow-hidden">
+                                                    <div id="default-logo" class="w-full h-full bg-[#1E255E] rounded-[12px] flex items-center justify-center text-white font-black text-[34px] tracking-tighter select-none">mb</div>
+                                                    <img id="custom-logo" class="hidden w-full h-full object-contain rounded-[12px]" src="" alt="Logo">
+                                                </div>
+                                                <div class="flex-1">
+                                                    <h1 id="view-nama-perusahaan" class="text-[32px] font-bold tracking-tight text-[#11153B] font-sans m-0 p-0 leading-none">CV. MAJU BERSAMA</h1>
+                                                </div>
+                                            </div>
+                                            
+                                            <!-- Garis Pembatas Kop -->
+                                            <div class="h-[7px] w-full mb-1" style="background: linear-gradient(to right, #9CA3AF 0%, #9CA3AF 46%, #2190BC 46%, #2190BC 62%, #34507C 62%, #34507C 69%, #1E255E 69%, #1E255E 100%);"></div>
 
-                            <!-- ISI UTAMA SURAT -->
-                            <div class="surat-font space-y-4">
-                                <div id="view-judul-surat" class="text-center font-bold underline uppercase mb-3 tracking-wide">Surat Estimasi Biaya Mutasi</div>
-                                <div id="view-tujuan" class="whitespace-pre-line mb-3 tracking-wide">Kepada Yth,...</div>
-                                
-                                <div class="space-y-1">
-                                    <p class="font-bold">Dengan Hormat.</p>
-                                    <p>Dengan ini kami lampirkan estimasi biaya pengurusan : <span id="view-perihal" class="font-bold">MUTASI</span> dengan data sebagai berikut :</p>
-                                </div>
-
-                                <!-- TABEL UTAMA BLOK A -->
-                                <table class="w-full text-[13px] my-2 border-none">
-                                    <tbody id="view-table-a" class="leading-tight"></tbody>
-                                </table>
-
-                                <!-- PENGHUBUNG TRANSISI -->
-                                <div id="view-transisi" class="my-2 font-normal text-gray-900">Data Kendaraaan diatas, akan di MUTASI kan ke nama dibawah ini:</div>
-
-                                <!-- TABEL UTAMA BLOK B -->
-                                <table class="w-full text-[13px] my-2 border-none">
-                                    <tbody id="view-table-b" class="leading-tight"></tbody>
-                                </table>
-
-                                <!-- BIAYA & PENUTUP -->
-                                <div class="pt-1 leading-relaxed">
-                                    Dengan estimasi total biaya pengurusan sebesar <span id="view-biaya-angka" class="font-bold">Rp. 13.183.500,-</span> ( <span id="view-biaya-huruf" class="italic font-normal">Tiga belas juta seratus delapan puluh tiga ribu lima ratus rupiah</span> )
-                                    </div>
-                                    <p class="pt-0.5">demikian surat biaya estimasi pengurusan ini kami buat, atas perhatian dan kerjasamanya kami ucapkan terima kasih.</p>
-                                </div>
-                            </div>
-
-                            <!-- FOOTER KAKI HALAMAN & SIGNATURE -->
-                            <div class="mt-6 space-y-4">
-                                <div class="flex justify-between items-end pb-2">
-                                    <!-- QR Code Validasi -->
-                                    <div class="flex items-center gap-2 border border-gray-300 p-1 rounded bg-gray-50/40 w-[210px] shadow-sm">
-                                        <div id="qrcode" class="bg-white p-0.5 shrink-0"></div>
-                                        <div class="text-[13px] text-gray-500 leading-tight">
-                                            <span class="text-green-700 font-bold block"><i class="fas fa-check-circle"></i> DOKUMEN VALID</span>
-                                            Scan otomatis untuk verifikasi sistem online perusahaan.
+                                            <!-- Nomor Surat & Tanggal Berkas (hanya di halaman pertama, di halaman lanjutan tetap muncul garis kop saja) -->
+                                            <div class="flex justify-between items-end surat-font font-normal mb-2 text-gray-900">
+                                                <div>Nomor: <span id="view-nomor-surat" class="font-bold">-</span></div>
+                                                <div id="view-tgl">Banda Aceh, 24 Juni 2026</div>
+                                            </div>
                                         </div>
-                                    </div>
+                                    </td>
+                                </tr>
+                            </thead>
 
-                                    <!-- Area Tanda Tangan -->
-                                    <div class="text-left relative pr-10 text-[13px] font-sans shrink-0" style="min-width: 170px;">
-                                        <p class="m-0">Hormat Kami,</p>
-                                        <p id="view-ttd-perusahaan" class="font-bold m-0 mb-14">CV Maju Bersama</p>
-
-                                        <p id="view-ttd-nama" class="font-bold underline m-0">FIRMANSYAH</p>
-                                    </div>
-                                </div>
-
-                                <!-- INFORMASI ALAMAT FOOTER EDITABLE (sesuai KOP asli: ikon 1x per baris + garis pembatas vertikal) -->
-                                <div class="border-t border-gray-300 pt-2 text-[13px] text-gray-800 font-sans space-y-1">
-                                    <div class="flex items-start gap-2">
-                                        <i class="fas fa-map-marker-alt text-gray-800 mt-0.5 w-3 text-center shrink-0"></i>
-                                        <div class="flex-1 grid grid-cols-2 gap-x-3">
-                                            <span id="view-footer-alamat1" class="border-r border-gray-300 pr-3">...</span>
-                                            <span id="view-footer-alamat2">...</span>
+                            <!-- ===== TFOOT: FOOTER SURAT — BERULANG DI SETIAP HALAMAN ===== -->
+                            <tfoot>
+                                <tr>
+                                    <td>
+                                        <div id="surat-footer-bottom" style="padding: 4mm 18mm 10mm 18mm;">
+                                            <!-- INFORMASI ALAMAT FOOTER EDITABLE -->
+                                            <div class="border-t border-gray-300 pt-2 text-[13px] text-gray-800 font-sans space-y-1">
+                                                <div class="flex items-start gap-2">
+                                                    <i class="fas fa-map-marker-alt text-gray-800 mt-0.5 w-3 text-center shrink-0"></i>
+                                                    <div class="flex-1 grid grid-cols-2 gap-x-3">
+                                                        <span id="view-footer-alamat1" class="border-r border-gray-300 pr-3">...</span>
+                                                        <span id="view-footer-alamat2">...</span>
+                                                    </div>
+                                                </div>
+                                                <div class="flex items-center gap-2">
+                                                    <i class="fas fa-phone text-gray-800 w-3 text-center shrink-0"></i>
+                                                    <span id="view-footer-telp">...</span>
+                                                </div>
+                                                <div class="flex items-start gap-2">
+                                                    <i class="fas fa-envelope text-gray-800 mt-0.5 w-3 text-center shrink-0"></i>
+                                                    <div class="flex-1 grid grid-cols-2 gap-x-3">
+                                                        <span id="view-footer-email1" class="text-blue-700 underline border-r border-gray-300 pr-3">...</span>
+                                                        <span id="view-footer-email2" class="text-blue-700 underline">...</span>
+                                                    </div>
+                                                </div>
+                                                <div class="h-[10px] w-full mt-1.5" style="background: linear-gradient(to right, #2190BC 0%, #2190BC 38%, #1E255E 38%, #1E255E 100%);"></div>
+                                            </div>
                                         </div>
-                                    </div>
-                                    <div class="flex items-center gap-2">
-                                        <i class="fas fa-phone text-gray-800 w-3 text-center shrink-0"></i>
-                                        <span id="view-footer-telp">...</span>
-                                    </div>
-                                    <div class="flex items-start gap-2">
-                                        <i class="fas fa-envelope text-gray-800 mt-0.5 w-3 text-center shrink-0"></i>
-                                        <div class="flex-1 grid grid-cols-2 gap-x-3">
-                                            <span id="view-footer-email1" class="text-blue-700 underline border-r border-gray-300 pr-3">...</span>
-                                            <span id="view-footer-email2" class="text-blue-700 underline">...</span>
-                                        </div>
-                                    </div>
-                                    <div class="h-[10px] w-full mt-1.5" style="background: linear-gradient(to right, #2190BC 0%, #2190BC 38%, #1E255E 38%, #1E255E 100%);"></div>
-                                </div>
-                            </div>
+                                    </td>
+                                </tr>
+                            </tfoot>
 
-                        </div>
+                            <!-- ===== TBODY: ISI SURAT ===== -->
+                            <tbody>
+                                <tr>
+                                    <td id="surat-body-content" style="padding: 2mm 18mm 6mm 18mm; vertical-align: top;">
+                                        <!-- ISI UTAMA SURAT -->
+                                        <div class="surat-font space-y-4">
+                                            <div id="view-judul-surat" class="text-center font-bold underline uppercase mb-3 tracking-wide">Surat Estimasi Biaya Mutasi</div>
+                                            <div id="view-tujuan" class="whitespace-pre-line mb-3 tracking-wide">Kepada Yth,...</div>
+                                            
+                                            <div class="space-y-1">
+                                                <p class="font-bold">Dengan Hormat.</p>
+                                                <p>Dengan ini kami lampirkan estimasi biaya pengurusan : <span id="view-perihal" class="font-bold">MUTASI</span> dengan data sebagai berikut :</p>
+                                            </div>
+
+                                            <!-- TABEL UTAMA BLOK A -->
+                                            <table class="w-full text-[13px] my-2 border-none">
+                                                <tbody id="view-table-a" class="leading-tight"></tbody>
+                                            </table>
+
+                                            <!-- PENGHUBUNG TRANSISI -->
+                                            <div id="view-transisi" class="my-2 font-normal text-gray-900">Data Kendaraaan diatas, akan di MUTASI kan ke nama dibawah ini:</div>
+
+                                            <!-- TABEL UTAMA BLOK B -->
+                                            <table class="w-full text-[13px] my-2 border-none">
+                                                <tbody id="view-table-b" class="leading-tight"></tbody>
+                                            </table>
+
+                                            <!-- BIAYA & PENUTUP -->
+                                            <div class="pt-1 leading-relaxed">
+                                                Dengan estimasi total biaya pengurusan sebesar <span id="view-biaya-angka" class="font-bold">Rp. 13.183.500,-</span> ( <span id="view-biaya-huruf" class="italic font-normal">Tiga belas juta seratus delapan puluh tiga ribu lima ratus rupiah</span> )
+                                            </div>
+                                            <p class="pt-0.5">demikian surat biaya estimasi pengurusan ini kami buat, atas perhatian dan kerjasamanya kami ucapkan terima kasih.</p>
+                                        </div>
+
+                                        <!-- TANDA TANGAN & QR CODE (di akhir isi surat, sebelum footer) -->
+                                        <div class="mt-6 mb-4">
+                                            <div class="flex justify-between items-end pb-2">
+                                                <!-- QR Code Validasi -->
+                                                <div class="flex items-center gap-2 border border-gray-300 p-1 rounded bg-gray-50/40 w-[210px] shadow-sm">
+                                                    <div id="qrcode" class="bg-white p-0.5 shrink-0"></div>
+                                                    <div class="text-[13px] text-gray-500 leading-tight">
+                                                        <span class="text-green-700 font-bold block"><i class="fas fa-check-circle"></i> DOKUMEN VALID</span>
+                                                        Scan otomatis untuk verifikasi sistem online perusahaan.
+                                                    </div>
+                                                </div>
+
+                                                <!-- Area Tanda Tangan -->
+                                                <div class="text-left relative pr-10 text-[13px] font-sans shrink-0" style="min-width: 170px;">
+                                                    <p class="m-0">Hormat Kami,</p>
+                                                    <p id="view-ttd-perusahaan" class="font-bold m-0 mb-14">CV Maju Bersama</p>
+                                                    <p id="view-ttd-nama" class="font-bold underline m-0">FIRMANSYAH</p>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </td>
+                                </tr>
+                            </tbody>
+
+                        </table>
                     </div>
                     </div>
                 </div>
