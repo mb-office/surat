@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Verifikasi Dokumen - CV. Maju Bersama</title>
+<script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+<style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+    body{font-family:'Inter',sans-serif;background:#eef1f6;}
+</style>
+</head>
+<body class="min-h-screen flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl shadow-xl max-w-md w-full p-6">
+        <div class="flex items-center gap-3 mb-4 pb-3 border-b border-gray-200">
+            <div class="w-12 h-12 bg-[#1E255E] rounded-[10px] flex items-center justify-center text-white font-black text-xl shrink-0">mb</div>
+            <div>
+                <h1 class="font-bold text-gray-800 leading-tight">CV. MAJU BERSAMA</h1>
+                <p class="text-[11px] text-gray-500">Sistem Verifikasi Dokumen Online</p>
+            </div>
+        </div>
+        <div id="hasil">
+            <div class="text-center py-8 text-gray-400">
+                <i class="fas fa-spinner fa-spin text-2xl mb-2"></i>
+                <p class="text-sm">Memeriksa dokumen...</p>
+            </div>
+        </div>
+        <p class="text-[10px] text-gray-300 text-center mt-4">Verifikasi otomatis &middot; CV. Maju Bersama</p>
+    </div>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
+        import { getFirestore, doc, getDoc } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
+
+        // >>> WAJIB SAMA PERSIS dengan firebaseConfig di file surat.html <<<
+        const firebaseConfig = {
+            apiKey: "AIzaSyBrNoZyqxL0GFQ3XWmSHf-JlW4rh3SHAgI",
+            authDomain: "mb-surat.firebaseapp.com",
+            projectId: "mb-surat",
+            storageBucket: "mb-surat.firebasestorage.app",
+            messagingSenderId: "994674900754",
+            appId: "1:994674900754:web:14832135e37a3fa3977dcb"
+        };
+
+        const hasilEl = document.getElementById('hasil');
+
+        function tampilkanError(judul, pesan) {
+            hasilEl.innerHTML = `
+                <div class="text-center py-6">
+                    <i class="fas fa-times-circle text-5xl text-red-500 mb-3"></i>
+                    <p class="font-bold text-red-600 text-lg">${judul}</p>
+                    <p class="text-xs text-gray-500 mt-1">${pesan}</p>
+                </div>`;
+        }
+
+        function escapeHtml(s) {
+            const d = document.createElement('div');
+            d.innerText = (s ?? '-').toString();
+            return d.innerHTML;
+        }
+
+        function tampilkanValid(data) {
+            hasilEl.innerHTML = `
+                <div class="text-center py-3 mb-3">
+                    <i class="fas fa-check-circle text-5xl text-green-600 mb-2"></i>
+                    <p class="font-bold text-green-700 text-lg">DOKUMEN VALID</p>
+                    <p class="text-[11px] text-gray-500">Surat ini tercatat resmi di sistem CV. Maju Bersama</p>
+                </div>
+                <div class="text-xs text-gray-700 space-y-1.5 border-t border-gray-200 pt-3">
+                    <p><span class="text-gray-400">Nomor Surat:</span> <span class="font-bold">${escapeHtml(data.nomor)}</span></p>
+                    <p><span class="text-gray-400">Judul:</span> <span class="font-bold">${escapeHtml(data.judul)}</span></p>
+                    <p><span class="text-gray-400">Tanggal:</span> <span class="font-bold">${escapeHtml(data.tgl)}</span></p>
+                    <p><span class="text-gray-400">Perihal:</span> <span class="font-bold">${escapeHtml(data.perihal)}</span></p>
+                    <p><span class="text-gray-400">Diterbitkan:</span> <span class="font-bold">${data.diterbitkanPada ? new Date(data.diterbitkanPada).toLocaleString('id-ID') : '-'}</span></p>
+                </div>`;
+        }
+
+        try {
+            const app = initializeApp(firebaseConfig);
+            const db = getFirestore(app);
+
+            const params = new URLSearchParams(window.location.search);
+            const id = params.get('id');
+
+            if (!id) {
+                tampilkanError('LINK TIDAK LENGKAP', 'Link verifikasi tidak menyertakan kode dokumen (?id=...).');
+            } else {
+                const snap = await getDoc(doc(db, 'surat', id));
+                if (snap.exists()) {
+                    tampilkanValid(snap.data());
+                } else {
+                    tampilkanError('DOKUMEN TIDAK DITEMUKAN', 'Kode dokumen ini tidak terdaftar di sistem kami. Surat ini mungkin tidak resmi.');
+                }
+            }
+        } catch (e) {
+            console.error(e);
+            tampilkanError('GAGAL MEMERIKSA', 'Terjadi kesalahan koneksi ke server verifikasi. (' + (e.message || '') + ')');
+        }
+    </script>
+</body>
+</html>

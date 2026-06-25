@@ -12,6 +12,84 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
     <!-- SheetJS -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <!-- Tesseract.js (OCR untuk scan KTP) -->
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.0.4/dist/tesseract.min.js"></script>
+    <!-- Fuse.js (Fuzzy matching label KTP) -->
+    <script src="https://cdn.jsdelivr.net/npm/fuse.js@7.0.0/dist/fuse.min.js"></script>
+    <!-- Firebase (Auth + Firestore) untuk Login Admin & Verifikasi Online QR -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
+        import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
+        import { getFirestore, doc, setDoc, runTransaction } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
+
+        // >>> GANTI bagian di bawah ini dengan Firebase Config dari project "mb surat" Anda <<<
+        // Cara ambil: Firebase Console > buka project > ikon gerigi (Project Settings)
+        // > scroll ke "Your apps" > kalau belum ada, klik ikon web "</>" untuk daftarkan app baru
+        // > copy objek firebaseConfig yang muncul, lalu tempel persis di sini.
+        const firebaseConfig = {
+            apiKey: "AIzaSyBrNoZyqxL0GFQ3XWmSHf-JlW4rh3SHAgI",
+            authDomain: "mb-surat.firebaseapp.com",
+            projectId: "mb-surat",
+            storageBucket: "mb-surat.firebasestorage.app",
+            messagingSenderId: "994674900754",
+            appId: "1:994674900754:web:14832135e37a3fa3977dcb"
+        };
+
+        let auth, db, firebaseReady = false;
+        try {
+            const app = initializeApp(firebaseConfig);
+            auth = getAuth(app);
+            db = getFirestore(app);
+            firebaseReady = true;
+        } catch (e) {
+            console.error("Firebase belum terkonfigurasi dengan benar:", e);
+        }
+        window.isFirebaseReady = () => firebaseReady;
+
+        window.fbLogin = async (email, password) => {
+            if (!firebaseReady) throw new Error("Firebase Config belum diisi di kode HTML.");
+            return signInWithEmailAndPassword(auth, email, password);
+        };
+        window.fbLogout = async () => { if (firebaseReady) return signOut(auth); };
+        window.fbOnAuthChange = (callback) => {
+            if (!firebaseReady) { callback(null); return; }
+            onAuthStateChanged(auth, callback);
+        };
+
+        // Ambil nomor urut otomatis (berbasis bulan & tahun berjalan) dari counter di Firestore
+        window.fbGetNextNomor = async () => {
+            if (!firebaseReady) throw new Error("Firebase belum terhubung.");
+            const now = new Date();
+            const bulanRomawi = ["I","II","III","IV","V","VI","VII","VIII","IX","X","XI","XII"][now.getMonth()];
+            const tahun = now.getFullYear();
+            const counterRef = doc(db, "counters", `MB-${tahun}-${now.getMonth() + 1}`);
+            const nextSeq = await runTransaction(db, async (tx) => {
+                const snap = await tx.get(counterRef);
+                const current = snap.exists() ? (snap.data().lastNumber || 0) : 0;
+                const next = current + 1;
+                tx.set(counterRef, { lastNumber: next }, { merge: true });
+                return next;
+            });
+            return String(nextSeq).padStart(3, '0') + "/MB/" + bulanRomawi + "/" + tahun;
+        };
+
+        // Token acak (bukan nomor urut) dipakai sebagai ID dokumen publik agar tidak bisa ditebak/diurutkan
+        function buatTokenAcak(panjang = 24) {
+            const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
+            let s = '';
+            for (let i = 0; i < panjang; i++) s += chars.charAt(Math.floor(Math.random() * chars.length));
+            return s;
+        }
+
+        // Simpan data surat ke Firestore agar bisa diverifikasi lewat scan QR
+        // ID dokumen = token acak (BUKAN nomor surat) supaya tidak bisa ditebak/diurutkan orang lain
+        window.fbSaveSurat = async (nomor, data) => {
+            if (!firebaseReady) throw new Error("Firebase belum terhubung.");
+            const token = buatTokenAcak();
+            await setDoc(doc(db, "surat", token), { nomor, token, ...data, diterbitkanPada: new Date().toISOString() });
+            return token;
+        };
+    </script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
         
@@ -126,8 +204,31 @@
 </head>
 <body class="md:h-screen w-screen relative text-gray-800 flex flex-col overflow-x-hidden p-2 md:p-4 justify-center items-center">
 
+    <!-- LOGIN OVERLAY (ADMIN) -->
+    <div id="login-overlay" class="no-print fixed inset-0 bg-gray-900/95 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
+        <div class="bg-white rounded-xl shadow-2xl p-6 w-full max-w-sm space-y-3">
+            <div class="text-center mb-2">
+                <div class="w-14 h-14 bg-[#1E255E] rounded-xl flex items-center justify-center text-white font-black text-2xl mx-auto mb-2">mb</div>
+                <h2 class="font-bold text-lg text-gray-800">Login Admin</h2>
+                <p class="text-xs text-gray-500">Sistem Surat CV. Maju Bersama</p>
+            </div>
+            <div>
+                <label class="text-xs text-gray-600 block mb-1">Email</label>
+                <input type="email" id="login-email" class="w-full p-2 border border-gray-300 rounded text-sm" placeholder="admin@email.com">
+            </div>
+            <div>
+                <label class="text-xs text-gray-600 block mb-1">Password</label>
+                <input type="password" id="login-password" class="w-full p-2 border border-gray-300 rounded text-sm" placeholder="••••••••">
+            </div>
+            <p id="login-error" class="text-xs text-red-600 hidden"></p>
+            <button onclick="doLogin()" class="w-full bg-[#1E255E] hover:bg-[#11153B] text-white py-2 rounded-lg text-sm font-bold">Masuk</button>
+            <button onclick="skipLogin()" class="w-full text-gray-400 hover:text-gray-600 text-[11px] py-1">Lewati (Mode Offline — tanpa simpan/verifikasi online)</button>
+            <p class="text-[10px] text-gray-400 text-center pt-1">Belum bisa login? Pastikan Firebase Config sudah diisi & akun admin sudah dibuat di Firebase Console &gt; Authentication.</p>
+        </div>
+    </div>
+
     <!-- MAIN APP CONTAINER -->
-    <div id="app-container" class="bg-white/85 backdrop-blur-2xl w-full h-full max-w-[1400px] rounded-xl shadow-2xl border border-white/40 flex flex-col overflow-hidden">
+    <div id="app-container" style="display:none;" class="bg-white/85 backdrop-blur-2xl w-full h-full max-w-[1400px] rounded-xl shadow-2xl border border-white/40 flex flex-col overflow-hidden">
         
         <!-- Window Header Title -->
         <div class="no-print h-10 bg-gray-100/90 flex items-center justify-between px-4 border-b border-gray-200 shrink-0">
@@ -135,7 +236,7 @@
                 <span class="w-3 h-3 rounded-full bg-gray-300"></span>
                 <span class="text-xs font-bold text-gray-700 tracking-wide">Panel Pembuat Surat — Kontrol Kustomisasi Penuh</span>
             </div>
-            <div></div>
+            <button onclick="doLogout()" class="text-xs text-gray-500 hover:text-red-600 font-medium"><i class="fas fa-sign-out-alt"></i> Keluar</button>
         </div>
 
         <!-- SWITCHER TAB UNTUK HP -->
@@ -153,7 +254,21 @@
             
             <!-- SISI KIRI: INPUT FORM -->
             <div id="panel-input" class="w-full md:w-[42%] border-r border-gray-200 p-3 overflow-y-auto space-y-3 bg-gray-50/60 h-full">
-                
+
+                <!-- SIMPAN / MUAT TEMPLATE (FITUR BARU) -->
+                <div class="bg-violet-50/80 p-3 rounded-lg border border-violet-200 shadow-sm space-y-2 text-xs">
+                    <span class="font-bold text-violet-800 block uppercase tracking-wider text-[11px]"><i class="fas fa-save"></i> Simpan / Muat Template Surat</span>
+                    <div>
+                        <label class="text-gray-600 block mb-0.5 font-medium">Judul Surat</label>
+                        <input type="text" id="in-judul-surat" value="Surat Estimasi Biaya Mutasi - SAKYAN" class="w-full p-1.5 border border-gray-300 rounded" oninput="renderLive()">
+                    </div>
+                    <button onclick="saveTemplate()" class="w-full bg-violet-600 hover:bg-violet-700 text-white py-1.5 rounded text-[11px] font-bold"><i class="fas fa-save"></i> Simpan sebagai Template</button>
+                    <div>
+                        <label class="text-gray-600 block mb-0.5 font-medium">Template Tersimpan di HP ini</label>
+                        <div id="daftar-template" class="space-y-1"></div>
+                    </div>
+                </div>
+
                 <!-- EDIT KOP & LOGO (FITUR BARU) -->
                 <div class="bg-amber-50/80 p-3 rounded-lg border border-amber-200 shadow-sm space-y-2 text-xs">
                     <span class="font-bold text-amber-800 block uppercase tracking-wider text-[11px]"><i class="fas fa-heading"></i> Pengaturan Kop & Logo</span>
@@ -186,6 +301,24 @@
                     </div>
                 </div>
 
+                <!-- NOMOR SURAT & VERIFIKASI ONLINE (FITUR BARU) -->
+                <div class="bg-emerald-50/80 p-3 rounded-lg border border-emerald-200 shadow-sm space-y-2 text-xs">
+                    <span class="font-bold text-emerald-800 block uppercase tracking-wider text-[11px]"><i class="fas fa-qrcode"></i> Nomor Surat & Verifikasi Online</span>
+                    <div>
+                        <label class="text-gray-600 block mb-0.5 font-medium">Nomor Surat</label>
+                        <div class="flex gap-1">
+                            <input type="text" id="in-nomor-surat" value="" placeholder="contoh: 001/MB/VI/2026" class="flex-1 p-1.5 border border-gray-300 rounded font-bold" oninput="renderLive()">
+                            <button onclick="generateNomorOtomatis()" class="bg-emerald-600 text-white px-2 rounded text-[10px] font-bold whitespace-nowrap"><i class="fas fa-sync"></i> Otomatis</button>
+                        </div>
+                    </div>
+                    <div>
+                        <label class="text-gray-600 block mb-0.5 font-medium">Domain Verifikasi (isi setelah deploy verify.html)</label>
+                        <input type="text" id="in-domain-verifikasi" value="https://mb-surat.web.app/verify.html" class="w-full p-1.5 border border-gray-300 rounded text-[10.5px]" oninput="renderLive()">
+                    </div>
+                    <button onclick="simpanDanTerbitkan()" class="w-full bg-emerald-700 hover:bg-emerald-800 text-white py-1.5 rounded text-[11px] font-bold"><i class="fas fa-cloud-upload-alt"></i> Simpan & Terbitkan (Update QR)</button>
+                    <p id="status-publish" class="text-[10px] text-gray-500"></p>
+                </div>
+
                 <!-- BLOK DATA A (ASAL) -->
                 <div class="bg-white p-3 rounded-lg border border-gray-200 shadow-sm space-y-2 text-xs">
                     <div class="flex justify-between items-center">
@@ -199,6 +332,22 @@
                 <div class="bg-white p-3 rounded-lg border border-gray-200 shadow-sm text-xs">
                     <label class="block font-bold text-gray-700 uppercase text-[11px] mb-1">Kalimat Penghubung Tengah</label>
                     <input type="text" id="in-transisi" value="Data Kendaraaan diatas, akan di MUTASI kan ke nama dibawah ini:" class="w-full p-1.5 border border-gray-300 rounded" oninput="renderLive()">
+                </div>
+
+                <!-- SCAN KTP OTOMATIS - OCR (FITUR BARU) -->
+                <div class="bg-sky-50/80 p-3 rounded-lg border border-sky-200 shadow-sm space-y-2 text-xs">
+                    <span class="font-bold text-sky-800 block uppercase tracking-wider text-[11px]"><i class="fas fa-id-card"></i> Scan KTP Otomatis (OCR)</span>
+                    <div>
+                        <label class="text-gray-600 block mb-0.5 font-medium">Foto KTP (boleh langsung foto dari kamera)</label>
+                        <input type="file" id="in-ktp-foto" accept="image/*" capture="environment" class="w-full p-1 border border-gray-300 rounded bg-white">
+                    </div>
+                    <button onclick="scanKTP()" class="w-full bg-sky-600 hover:bg-sky-700 text-white py-1.5 rounded text-[11px] font-bold"><i class="fas fa-magic"></i> Scan & Isi Otomatis ke Blok Data Bawah</button>
+                    <p id="status-ocr" class="text-[10px] text-gray-500"></p>
+                    <details class="text-[10px] text-gray-400">
+                        <summary class="cursor-pointer">Lihat teks mentah hasil OCR (untuk koreksi manual)</summary>
+                        <textarea id="ocr-raw-text" rows="5" class="w-full mt-1 p-1.5 border border-gray-200 rounded text-[10px] font-mono" readonly></textarea>
+                    </details>
+                    <p class="text-[10px] text-gray-400 italic">Hasil OCR otomatis terisi ke "Blok Data Bawah" di bawah — boleh dikoreksi manual kalau ada salah baca, atau isi semua field secara manual tanpa OCR sama sekali.</p>
                 </div>
 
                 <!-- BLOK DATA B (TUJUAN) -->
@@ -281,11 +430,15 @@
                             <!-- Garis Pembatas Kop (4 segmen: abu-abu, biru muda, biru tua, navy - sesuai KOP asli) -->
                             <div class="h-[3.5px] w-full mb-1" style="background: linear-gradient(to right, #9CA3AF 0%, #9CA3AF 46%, #2190BC 46%, #2190BC 62%, #34507C 62%, #34507C 69%, #1E255E 69%, #1E255E 100%);"></div>
 
-                            <!-- Tanggal Berkas -->
-                            <div id="view-tgl" class="text-right surat-font font-normal mb-5 text-gray-900">Banda Aceh, 24 Juni 2026</div>
+                            <!-- Nomor Surat & Tanggal Berkas -->
+                            <div class="flex justify-between items-end surat-font font-normal mb-5 text-gray-900">
+                                <div>Nomor: <span id="view-nomor-surat" class="font-bold">-</span></div>
+                                <div id="view-tgl">Banda Aceh, 24 Juni 2026</div>
+                            </div>
 
                             <!-- ISI UTAMA SURAT -->
                             <div class="surat-font space-y-4">
+                                <div id="view-judul-surat" class="text-center font-bold underline uppercase mb-3 tracking-wide">Surat Estimasi Biaya Mutasi - SAKYAN</div>
                                 <div id="view-tujuan" class="whitespace-pre-line mb-3 tracking-wide">Kepada Yth,...</div>
                                 
                                 <div class="space-y-1">
@@ -389,11 +542,22 @@
         window.addEventListener('DOMContentLoaded', () => {
             buildFormRows('fields-a', initDataA);
             buildFormRows('fields-b', initDataB);
+            renderTemplateList();
 
-            new QRCode(document.getElementById("qrcode"), {
-                text: "https://cvmajubersama.web.app/verify/DOC-736294",
-                width: 50, height: 50
-            });
+            regenerateQRCode("Surat belum diterbitkan secara online - klik 'Simpan & Terbitkan' setelah login & Firebase terhubung.");
+
+            // Gerbang Login: tampilkan app hanya jika sudah login (atau pilih mode offline)
+            if (window.fbOnAuthChange) {
+                window.fbOnAuthChange((user) => {
+                    if (user) {
+                        showApp();
+                    } else if (!window.isOfflineMode) {
+                        showLogin();
+                    }
+                });
+            } else {
+                showApp(); // fallback kalau modul Firebase gagal dimuat (mis. tanpa internet)
+            }
 
             // Jalankan mode layar hp awal (Sembunyikan preview secara aman)
             if(window.innerWidth <= 768){
@@ -469,6 +633,11 @@
         }
 
         function renderLive() {
+            // Update Judul Surat & Nomor Surat
+            document.getElementById('view-judul-surat').innerText = document.getElementById('in-judul-surat').value;
+            const nomorVal = document.getElementById('in-nomor-surat').value.trim();
+            document.getElementById('view-nomor-surat').innerText = nomorVal || '-';
+
             // Update Kop & Nama Perusahaan
             const namaPerusahaan = document.getElementById('in-nama-perusahaan').value;
             document.getElementById('view-nama-perusahaan').innerText = namaPerusahaan;
@@ -516,12 +685,345 @@
             });
         }
 
+        // ====== FITUR SIMPAN / MUAT TEMPLATE (tersimpan di localStorage browser HP ini) ======
+        const TEMPLATE_KEY = 'surat_template_list_v1';
+
+        function getAllTemplates() {
+            try {
+                const raw = localStorage.getItem(TEMPLATE_KEY);
+                return raw ? JSON.parse(raw) : [];
+            } catch (e) {
+                console.error('Gagal membaca template tersimpan:', e);
+                return [];
+            }
+        }
+
+        function getCurrentFormData() {
+            const rowsA = Array.from(document.getElementById('fields-a').querySelectorAll('.dynamic-row')).map(r => ({ label: r.querySelector('.f-lbl').value, value: r.querySelector('.f-val').value }));
+            const rowsB = Array.from(document.getElementById('fields-b').querySelectorAll('.dynamic-row')).map(r => ({ label: r.querySelector('.f-lbl').value, value: r.querySelector('.f-val').value }));
+            return {
+                judul: document.getElementById('in-judul-surat').value,
+                namaPerusahaan: document.getElementById('in-nama-perusahaan').value,
+                tgl: document.getElementById('in-tgl').value,
+                perihal: document.getElementById('in-perihal').value,
+                tujuan: document.getElementById('in-tujuan').value,
+                rowsA: rowsA,
+                transisi: document.getElementById('in-transisi').value,
+                rowsB: rowsB,
+                biayaAngka: document.getElementById('in-biaya-angka').value,
+                biayaHuruf: document.getElementById('in-biaya-huruf').value,
+                footerAlamat1: document.getElementById('in-footer-alamat1').value,
+                footerAlamat2: document.getElementById('in-footer-alamat2').value,
+                footerTelp: document.getElementById('in-footer-telp').value,
+                footerEmail1: document.getElementById('in-footer-email1').value,
+                footerEmail2: document.getElementById('in-footer-email2').value,
+                ttdNama: document.getElementById('in-ttd-nama').value
+            };
+        }
+
+        function saveTemplate() {
+            const judul = document.getElementById('in-judul-surat').value.trim();
+            if (!judul) {
+                alert('Isi Judul Surat dulu sebelum menyimpan template.');
+                return;
+            }
+            const data = getCurrentFormData();
+            let list = getAllTemplates();
+            const existingIndex = list.findIndex(t => t.judul.toLowerCase() === judul.toLowerCase());
+            const entry = { judul: judul, data: data, savedAt: new Date().toISOString() };
+            if (existingIndex >= 0) {
+                if (!confirm(`Template dengan judul "${judul}" sudah ada. Timpa / update template tersebut?`)) return;
+                list[existingIndex] = entry;
+            } else {
+                list.push(entry);
+            }
+            try {
+                localStorage.setItem(TEMPLATE_KEY, JSON.stringify(list));
+                renderTemplateList();
+                alert('Template tersimpan di HP ini: "' + judul + '"');
+            } catch (e) {
+                console.error('Gagal menyimpan template:', e);
+                alert('Gagal menyimpan template. Penyimpanan browser mungkin penuh.');
+            }
+        }
+
+        function loadTemplate(index) {
+            const list = getAllTemplates();
+            const entry = list[index];
+            if (!entry) return;
+            const d = entry.data;
+            document.getElementById('in-judul-surat').value = d.judul || '';
+            document.getElementById('in-nama-perusahaan').value = d.namaPerusahaan || '';
+            document.getElementById('in-tgl').value = d.tgl || '';
+            document.getElementById('in-perihal').value = d.perihal || '';
+            document.getElementById('in-tujuan').value = d.tujuan || '';
+            document.getElementById('in-transisi').value = d.transisi || '';
+            document.getElementById('in-biaya-angka').value = d.biayaAngka || '';
+            document.getElementById('in-biaya-huruf').value = d.biayaHuruf || '';
+            document.getElementById('in-footer-alamat1').value = d.footerAlamat1 || '';
+            document.getElementById('in-footer-alamat2').value = d.footerAlamat2 || '';
+            document.getElementById('in-footer-telp').value = d.footerTelp || '';
+            document.getElementById('in-footer-email1').value = d.footerEmail1 || '';
+            document.getElementById('in-footer-email2').value = d.footerEmail2 || '';
+            document.getElementById('in-ttd-nama').value = d.ttdNama || '';
+            buildFormRows('fields-a', d.rowsA || []);
+            buildFormRows('fields-b', d.rowsB || []);
+            renderLive();
+            if (window.innerWidth <= 768) switchTab('preview');
+        }
+
+        function deleteTemplate(index) {
+            const list = getAllTemplates();
+            const entry = list[index];
+            if (!entry) return;
+            if (!confirm(`Hapus template "${entry.judul}"? Tindakan ini tidak bisa dibatalkan.`)) return;
+            list.splice(index, 1);
+            localStorage.setItem(TEMPLATE_KEY, JSON.stringify(list));
+            renderTemplateList();
+        }
+
+        function renderTemplateList() {
+            const container = document.getElementById('daftar-template');
+            const list = getAllTemplates();
+            if (!list.length) {
+                container.innerHTML = '<p class="text-gray-400 italic">Belum ada template tersimpan.</p>';
+                return;
+            }
+            container.innerHTML = '';
+            list.forEach((entry, idx) => {
+                const row = document.createElement('div');
+                row.className = 'flex items-center gap-1 bg-white border border-gray-200 rounded p-1.5';
+                row.innerHTML = `
+                    <span class="flex-1 truncate text-[11px] font-medium">${entry.judul}</span>
+                    <button onclick="loadTemplate(${idx})" class="bg-blue-600 text-white px-2 py-0.5 rounded text-[10px]"><i class="fas fa-folder-open"></i> Muat</button>
+                    <button onclick="deleteTemplate(${idx})" class="bg-red-500 text-white px-2 py-0.5 rounded text-[10px]"><i class="fas fa-trash"></i></button>
+                `;
+                container.appendChild(row);
+            });
+        }
+        // ====== AKHIR FITUR TEMPLATE ======
+
+        // ====== LOGIN ADMIN (Firebase Auth) ======
+        function setLoginError(msg) {
+            const el = document.getElementById('login-error');
+            el.textContent = msg;
+            el.classList.toggle('hidden', !msg);
+        }
+
+        function showApp() {
+            document.getElementById('login-overlay').style.display = 'none';
+            document.getElementById('app-container').style.display = 'flex';
+        }
+
+        function showLogin() {
+            document.getElementById('login-overlay').style.display = 'flex';
+            document.getElementById('app-container').style.display = 'none';
+        }
+
+        async function doLogin() {
+            const email = document.getElementById('login-email').value.trim();
+            const password = document.getElementById('login-password').value;
+            setLoginError('');
+            if (!email || !password) { setLoginError('Isi email dan password dulu.'); return; }
+            try {
+                await window.fbLogin(email, password);
+                // showApp() otomatis dipanggil lewat fbOnAuthChange di bawah
+            } catch (e) {
+                console.error(e);
+                setLoginError('Login gagal: ' + (e.message || 'periksa email/password, atau Firebase Config belum diisi.'));
+            }
+        }
+
+        function skipLogin() {
+            window.isOfflineMode = true;
+            showApp();
+        }
+
+        async function doLogout() {
+            try { await window.fbLogout(); } catch (e) {}
+            window.isOfflineMode = false;
+            showLogin();
+        }
+
+        // ====== NOMOR SURAT OTOMATIS & TERBITKAN KE FIREBASE (VERIFIKASI QR) ======
+        async function generateNomorOtomatis() {
+            try {
+                if (!window.fbGetNextNomor) throw new Error('Modul Firebase belum termuat.');
+                const nomor = await window.fbGetNextNomor();
+                document.getElementById('in-nomor-surat').value = nomor;
+                renderLive();
+            } catch (e) {
+                console.error(e);
+                alert('Gagal mengambil nomor otomatis: ' + e.message + '\n\nPastikan Firebase Config sudah diisi, Firestore sudah aktif, dan Anda sudah login (bukan mode offline).');
+            }
+        }
+
+        let qrInstance = null;
+        function regenerateQRCode(text) {
+            const el = document.getElementById('qrcode');
+            el.innerHTML = '';
+            qrInstance = new QRCode(el, { text: text, width: 50, height: 50 });
+        }
+
+        async function simpanDanTerbitkan() {
+            const nomor = document.getElementById('in-nomor-surat').value.trim();
+            if (!nomor) { alert('Isi atau klik "Otomatis" untuk Nomor Surat dulu sebelum menyimpan & menerbitkan.'); return; }
+            const statusEl = document.getElementById('status-publish');
+            statusEl.textContent = 'Menyimpan ke server...';
+            try {
+                if (!window.fbSaveSurat) throw new Error('Modul Firebase belum termuat.');
+                const data = getCurrentFormData();
+                const token = await window.fbSaveSurat(nomor, data);
+                const domain = document.getElementById('in-domain-verifikasi').value.trim().replace(/\/$/, '');
+                const verifyUrl = domain + '?id=' + encodeURIComponent(token);
+                regenerateQRCode(verifyUrl);
+                statusEl.textContent = '✅ Tersimpan & diterbitkan. QR sekarang mengarah ke: ' + verifyUrl;
+            } catch (e) {
+                console.error(e);
+                statusEl.textContent = '';
+                alert('Gagal menyimpan ke Firebase: ' + e.message + '\n\nCek lagi: 1) Firebase Config sudah diisi benar, 2) Anda sudah login (bukan mode offline), 3) Firestore aktif & rules mengizinkan tulis untuk admin.');
+            }
+        }
+        // ====== AKHIR LOGIN & VERIFIKASI ONLINE ======
+
+        // ====== SCAN KTP OTOMATIS: OCR (Tesseract.js) + FUZZY MATCHING LABEL (Fuse.js) ======
+        const KTP_LABELS = [
+            'NIK', 'Nama', 'Tempat/Tgl Lahir', 'Jenis Kelamin', 'Gol Darah', 'Alamat',
+            'RT/RW', 'Kel/Desa', 'Kecamatan', 'Agama', 'Status Perkawinan', 'Pekerjaan',
+            'Kewarganegaraan', 'Berlaku Hingga'
+        ];
+
+        // Pemetaan label hasil OCR KTP -> label baris yang sudah ada di "Blok Data Bawah"
+        const PEMETAAN_KTP_KE_FORM = {
+            'NIK': 'NIK',
+            'Nama': 'NAMA',
+            'Tempat/Tgl Lahir': 'TEMPAT/TGL. LAHIR',
+            'Alamat': 'ALAMAT',
+            'Pekerjaan': 'PEKERJAAN'
+        };
+
+        function parseKTPText(text) {
+            const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+            const fuse = new Fuse(KTP_LABELS, { includeScore: true, threshold: 0.4 });
+            const hasil = {};
+
+            // NIK: cari deretan digit (atau huruf yang mirip digit hasil salah baca OCR) terpanjang, dekat 16 digit
+            const kandidatDigit = text.match(/[0-9OIlB]{10,20}/g) || [];
+            if (kandidatDigit.length) {
+                const dibersihkan = kandidatDigit
+                    .map(s => s.replace(/O/g, '0').replace(/[Il]/g, '1').replace(/B/g, '8'))
+                    .sort((a, b) => Math.abs(a.length - 16) - Math.abs(b.length - 16));
+                if (dibersihkan[0]) hasil['NIK'] = dibersihkan[0].slice(0, 16);
+            }
+
+            let labelMenunggu = null;
+            lines.forEach((line) => {
+                const bagian = line.split(/[:;]/);
+                const calonLabel = bagian[0].trim();
+                let labelCocok = null;
+                let sisaBaris = '';
+
+                if (calonLabel.length <= 25) {
+                    const match = fuse.search(calonLabel)[0];
+                    if (match && match.score < 0.4) {
+                        labelCocok = match.item;
+                        sisaBaris = bagian.slice(1).join(':').trim();
+                    }
+                }
+
+                if (labelCocok) {
+                    if (sisaBaris) {
+                        hasil[labelCocok] = sisaBaris;
+                        labelMenunggu = null;
+                    } else {
+                        labelMenunggu = labelCocok; // nilainya mungkin ada di baris berikutnya (layout KTP 2 kolom)
+                    }
+                } else if (labelMenunggu) {
+                    hasil[labelMenunggu] = line;
+                    labelMenunggu = null;
+                }
+            });
+
+            return hasil;
+        }
+
+        function terapkanHasilOCR(hasil) {
+            const rows = Array.from(document.getElementById('fields-b').querySelectorAll('.dynamic-row'));
+            const fuseRow = new Fuse(rows.map(r => r.querySelector('.f-lbl').value), { includeScore: true, threshold: 0.4 });
+            let jumlahTerisi = 0;
+
+            Object.keys(PEMETAAN_KTP_KE_FORM).forEach((labelOcr) => {
+                const nilai = hasil[labelOcr];
+                if (!nilai) return;
+                const targetLabel = PEMETAAN_KTP_KE_FORM[labelOcr];
+
+                let baris = rows.find(r => r.querySelector('.f-lbl').value.toUpperCase() === targetLabel);
+                if (!baris) {
+                    const cocok = fuseRow.search(targetLabel)[0];
+                    if (cocok) baris = rows.find(r => r.querySelector('.f-lbl').value === cocok.item);
+                }
+                if (baris) {
+                    baris.querySelector('.f-val').value = nilai.replace(/\s{2,}/g, ' ').trim();
+                    jumlahTerisi++;
+                }
+            });
+
+            renderLive();
+            return jumlahTerisi;
+        }
+
+        async function scanKTP() {
+            const fileInput = document.getElementById('in-ktp-foto');
+            const statusEl = document.getElementById('status-ocr');
+            const rawEl = document.getElementById('ocr-raw-text');
+
+            if (!fileInput.files || !fileInput.files[0]) {
+                alert('Pilih atau foto KTP dulu sebelum klik Scan.');
+                return;
+            }
+            if (typeof Tesseract === 'undefined' || typeof Fuse === 'undefined') {
+                alert('Modul OCR belum termuat (cek koneksi internet Anda), atau isi datanya secara manual saja.');
+                return;
+            }
+
+            statusEl.textContent = 'Memindai KTP... 0%';
+            rawEl.value = '';
+
+            try {
+                const { data } = await Tesseract.recognize(fileInput.files[0], 'ind+eng', {
+                    logger: (m) => {
+                        if (m.status === 'recognizing text') {
+                            statusEl.textContent = 'Memindai KTP... ' + Math.round(m.progress * 100) + '%';
+                        } else if (m.status) {
+                            statusEl.textContent = m.status + '...';
+                        }
+                    }
+                });
+
+                const text = data.text || '';
+                rawEl.value = text;
+
+                const hasil = parseKTPText(text);
+                const jumlah = terapkanHasilOCR(hasil);
+
+                statusEl.textContent = jumlah > 0
+                    ? `Selesai. ${jumlah} field terisi otomatis di "Blok Data Bawah" — cek & koreksi manual kalau ada salah baca.`
+                    : 'OCR selesai tapi tidak ada field yang berhasil dikenali otomatis. Cek teks mentah di bawah, lalu isi manual.';
+            } catch (e) {
+                console.error(e);
+                statusEl.textContent = '';
+                alert('Gagal memindai KTP: ' + e.message + '\n\nCoba foto ulang dengan pencahayaan lebih baik, atau isi manual saja.');
+            }
+        }
+        // ====== AKHIR SCAN KTP OTOMATIS ======
+
         function exportExcel() {
             const rowsA = Array.from(document.getElementById('fields-a').querySelectorAll('.dynamic-row')).map(r => [r.querySelector('.f-lbl').value, r.querySelector('.f-val').value]);
             const rowsB = Array.from(document.getElementById('fields-b').querySelectorAll('.dynamic-row')).map(r => [r.querySelector('.f-lbl').value, r.querySelector('.f-val').value]);
             
             const data = [
                 ["KOMPONEN", "DETAIL ESTIMASI SURAT"],
+                ["Judul Surat", document.getElementById('in-judul-surat').value],
                 ["Perusahaan", document.getElementById('in-nama-perusahaan').value],
                 ["Tanggal Berkas", document.getElementById('in-tgl').value],
                 ["Perihal Dokumen", document.getElementById('in-perihal').value],
