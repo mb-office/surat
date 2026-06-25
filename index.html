@@ -16,7 +16,7 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
         import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
-        import { getFirestore, doc, getDoc, setDoc, runTransaction } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
+        import { getFirestore, doc, getDoc, setDoc, deleteDoc, runTransaction, collection, getDocs, query, orderBy, limit } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
         // >>> GANTI bagian di bawah ini dengan Firebase Config dari project "mb surat" Anda <<<
         // Cara ambil: Firebase Console > buka project > ikon gerigi (Project Settings)
@@ -107,6 +107,44 @@
             const counterRef = doc(db, "counters", `MB-${now.getFullYear()}-${now.getMonth() + 1}`);
             await setDoc(counterRef, { lastNumber: 0 });
             return true;
+        };
+
+        // ====== TEMPLATE SURAT (Firestore, bukan localStorage lagi) ======
+        function sanitizeId(s) {
+            return s.toString().trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').slice(0, 80) || ('t_' + Date.now());
+        }
+        window.fbSaveTemplate = async (judul, data) => {
+            if (!firebaseReady) throw new Error("Firebase belum terhubung.");
+            const id = sanitizeId(judul);
+            await setDoc(doc(db, "templates", id), { judul, data, savedAt: new Date().toISOString() });
+            return id;
+        };
+        window.fbListTemplates = async () => {
+            if (!firebaseReady) throw new Error("Firebase belum terhubung.");
+            const snap = await getDocs(query(collection(db, "templates"), orderBy("savedAt", "desc")));
+            return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        };
+        window.fbDeleteTemplate = async (id) => {
+            if (!firebaseReady) throw new Error("Firebase belum terhubung.");
+            await deleteDoc(doc(db, "templates", id));
+        };
+
+        // ====== PENGATURAN DEFAULT (Firestore, 1 dokumen gabungan) ======
+        window.fbSaveSettings = async (dataObj) => {
+            if (!firebaseReady) throw new Error("Firebase belum terhubung.");
+            await setDoc(doc(db, "settings", "default"), dataObj, { merge: true });
+        };
+        window.fbLoadSettings = async () => {
+            if (!firebaseReady) throw new Error("Firebase belum terhubung.");
+            const snap = await getDoc(doc(db, "settings", "default"));
+            return snap.exists() ? snap.data() : {};
+        };
+
+        // ====== RIWAYAT SURAT TERBIT (daftar nomor surat dari Firestore, untuk admin) ======
+        window.fbListSurat = async (jumlah = 50) => {
+            if (!firebaseReady) throw new Error("Firebase belum terhubung.");
+            const snap = await getDocs(query(collection(db, "surat"), orderBy("diterbitkanPada", "desc"), limit(jumlah)));
+            return snap.docs.map(d => ({ id: d.id, ...d.data() }));
         };
     </script>
     <style>
@@ -272,161 +310,201 @@
         <div id="workspace-container" class="flex flex-col md:flex-row flex-1 overflow-hidden h-full relative">
             
             <!-- SISI KIRI: INPUT FORM -->
-            <div id="panel-input" class="w-full md:w-[42%] border-r border-gray-200 p-3 overflow-y-auto space-y-3 bg-gray-50/60 h-full">
+            <div id="panel-input" class="w-full md:w-[42%] border-r border-gray-200 p-3 overflow-y-auto space-y-2 bg-gray-50/60 h-full">
 
-                <!-- SIMPAN / MUAT TEMPLATE (FITUR BARU) -->
-                <div class="bg-violet-50/80 p-3 rounded-lg border border-violet-200 shadow-sm space-y-2 text-xs">
-                    <span class="font-bold text-violet-800 block uppercase tracking-wider text-[11px]"><i class="fas fa-save"></i> Simpan / Muat Template Surat</span>
-                    <div>
-                        <label class="text-gray-600 block mb-0.5 font-medium">Judul Surat</label>
-                        <input type="text" id="in-judul-surat" value="Surat Estimasi Biaya Mutasi - SAKYAN" class="w-full p-1.5 border border-gray-300 rounded" oninput="renderLive()">
+                <!-- ====== FOLDER 1: BUAT / EDIT SURAT ====== -->
+                <details open class="bg-white rounded-lg border border-gray-200 shadow-sm">
+                    <summary class="cursor-pointer select-none px-3 py-2 font-bold text-gray-700 text-xs flex items-center gap-2"><i class="fas fa-folder-open text-amber-500"></i> Buat / Edit Surat</summary>
+                    <div class="p-2 pl-3 space-y-2 border-t border-gray-100 ml-1 border-l border-gray-200">
+
+                        <!-- EDIT KOP & LOGO -->
+                        <details class="bg-amber-50/80 rounded-lg border border-amber-200">
+                            <summary class="cursor-pointer select-none px-3 py-2 font-bold text-amber-800 text-[11px] uppercase tracking-wider"><i class="fas fa-heading"></i> Pengaturan Kop & Logo</summary>
+                            <div class="p-3 pt-0 space-y-2 text-xs">
+                                <div>
+                                    <label class="text-gray-600 block mb-0.5 font-medium">Nama Perusahaan (Header)</label>
+                                    <input type="text" id="in-nama-perusahaan" value="CV. MAJU BERSAMA" class="w-full p-1.5 border border-gray-300 rounded" oninput="renderLive()">
+                                </div>
+                                <div>
+                                    <label class="text-gray-600 block mb-0.5 font-medium">Upload Logo Perusahaan (Ganti Kotak Default)</label>
+                                    <input type="file" id="in-logo-file" accept="image/*" class="w-full p-1 border border-gray-300 rounded bg-white" onchange="handleLogoUpload(this)">
+                                </div>
+                                <button onclick="simpanPanel('kop')" class="w-full bg-amber-600 hover:bg-amber-700 text-white py-1.5 rounded text-[11px] font-bold"><i class="fas fa-save"></i> Simpan sebagai Default</button>
+                            </div>
+                        </details>
+
+                        <!-- Informasi Utama -->
+                        <details class="bg-white rounded-lg border border-gray-200">
+                            <summary class="cursor-pointer select-none px-3 py-2 font-bold text-gray-700 text-[11px] uppercase tracking-wider">Informasi Utama</summary>
+                            <div class="p-3 pt-0 space-y-2 text-xs">
+                                <div class="grid grid-cols-2 gap-2">
+                                    <div>
+                                        <label class="text-gray-500 block mb-0.5">Tanggal Surat</label>
+                                        <input type="text" id="in-tgl" value="Banda Aceh, 24 Juni 2026" class="w-full p-1.5 border border-gray-300 rounded" oninput="renderLive()">
+                                    </div>
+                                    <div>
+                                        <label class="text-gray-500 block mb-0.5">Tipe / Perihal</label>
+                                        <input type="text" id="in-perihal" value="MUTASI" class="w-full p-1.5 border border-gray-300 rounded font-bold" oninput="renderLive()">
+                                    </div>
+                                </div>
+                                <div>
+                                    <label class="text-gray-500 block mb-0.5">Tujuan Surat (Kepada Yth,)</label>
+                                    <textarea id="in-tujuan" rows="3" class="w-full p-1.5 border border-gray-300 rounded leading-tight" oninput="renderLive()">Kepada Yth,&#10;PT Mandiri Utama Finance / Bpk SAKYAN&#10;Jl manek Roo 8c & 8d Kuta Padang, Kec. Johan Pahlawan&#10;Meulaboh Aceh Barat</textarea>
+                                </div>
+                                <button onclick="simpanPanel('info')" class="w-full bg-gray-600 hover:bg-gray-700 text-white py-1.5 rounded text-[11px] font-bold"><i class="fas fa-save"></i> Simpan sebagai Default</button>
+                            </div>
+                        </details>
+
+                        <!-- NOMOR SURAT & VERIFIKASI ONLINE -->
+                        <details open class="bg-emerald-50/80 rounded-lg border border-emerald-200">
+                            <summary class="cursor-pointer select-none px-3 py-2 font-bold text-emerald-800 text-[11px] uppercase tracking-wider"><i class="fas fa-qrcode"></i> Nomor Surat & Verifikasi Online</summary>
+                            <div class="p-3 pt-0 space-y-2 text-xs">
+                                <div>
+                                    <label class="text-gray-600 block mb-0.5 font-medium">Nomor Surat</label>
+                                    <div class="flex gap-1">
+                                        <input type="text" id="in-nomor-surat" value="" placeholder="contoh: 001/MB/VI/2026" class="flex-1 p-1.5 border border-gray-300 rounded font-bold" oninput="renderLive()">
+                                        <button onclick="generateNomorOtomatis()" class="bg-emerald-600 text-white px-2 rounded text-[10px] font-bold whitespace-nowrap"><i class="fas fa-sync"></i> Otomatis</button>
+                                    </div>
+                                </div>
+                                <div>
+                                    <label class="text-gray-600 block mb-0.5 font-medium">Domain Verifikasi (isi setelah deploy verify.html)</label>
+                                    <input type="text" id="in-domain-verifikasi" value="https://mb-office.github.io/surat/verify.html" class="w-full p-1.5 border border-gray-300 rounded text-[10.5px]" oninput="renderLive()">
+                                </div>
+                                <div class="flex gap-1">
+                                    <button onclick="simpanPanel('nomor')" class="flex-1 bg-gray-600 hover:bg-gray-700 text-white py-1.5 rounded text-[11px] font-bold"><i class="fas fa-save"></i> Simpan Domain</button>
+                                    <button onclick="testBukaDomain()" class="flex-1 bg-gray-400 hover:bg-gray-500 text-white py-1.5 rounded text-[11px] font-bold"><i class="fas fa-external-link-alt"></i> Test Buka</button>
+                                </div>
+                                <button onclick="simpanDanTerbitkan()" class="w-full bg-emerald-700 hover:bg-emerald-800 text-white py-1.5 rounded text-[11px] font-bold"><i class="fas fa-cloud-upload-alt"></i> Simpan & Terbitkan (Update QR)</button>
+                                <button onclick="promptResetNomor()" class="w-full bg-red-50 border border-red-300 text-red-600 hover:bg-red-100 py-1.5 rounded text-[11px] font-bold"><i class="fas fa-undo"></i> Reset Nomor Surat (Bulan Ini)</button>
+                                <p id="status-publish" class="text-[10px] text-gray-500"></p>
+                                <p id="status-koneksi" class="text-[10px] text-gray-400"></p>
+                            </div>
+                        </details>
+
+                        <!-- BLOK DATA A (ASAL) -->
+                        <details class="bg-white rounded-lg border border-gray-200">
+                            <summary class="cursor-pointer select-none px-3 py-2 font-bold text-gray-700 text-[11px] uppercase tracking-wider">Blok Data Atas (Asal)</summary>
+                            <div class="p-3 pt-0 space-y-2 text-xs">
+                                <div class="flex justify-end">
+                                    <button onclick="addBaris('fields-a')" class="bg-blue-600 text-white px-2 py-0.5 rounded text-[10px] font-medium"><i class="fas fa-plus"></i> Tambah</button>
+                                </div>
+                                <div id="fields-a" class="space-y-1"></div>
+                                <button onclick="simpanBlok('fields-a','a')" class="w-full bg-gray-600 hover:bg-gray-700 text-white py-1.5 rounded text-[11px] font-bold"><i class="fas fa-save"></i> Simpan sebagai Default</button>
+                            </div>
+                        </details>
+
+                        <!-- KALIMAT PENGHUBUNG -->
+                        <details class="bg-white rounded-lg border border-gray-200">
+                            <summary class="cursor-pointer select-none px-3 py-2 font-bold text-gray-700 text-[11px] uppercase tracking-wider">Kalimat Penghubung Tengah</summary>
+                            <div class="p-3 pt-0 text-xs">
+                                <input type="text" id="in-transisi" value="Data Kendaraaan diatas, akan di MUTASI kan ke nama dibawah ini:" class="w-full p-1.5 border border-gray-300 rounded" oninput="renderLive()">
+                                <button onclick="simpanPanel('transisi')" class="w-full mt-2 bg-gray-600 hover:bg-gray-700 text-white py-1.5 rounded text-[11px] font-bold"><i class="fas fa-save"></i> Simpan sebagai Default</button>
+                            </div>
+                        </details>
+
+                        <!-- BLOK DATA B (TUJUAN) -->
+                        <details class="bg-white rounded-lg border border-gray-200">
+                            <summary class="cursor-pointer select-none px-3 py-2 font-bold text-gray-700 text-[11px] uppercase tracking-wider">Blok Data Bawah (Tujuan)</summary>
+                            <div class="p-3 pt-0 space-y-2 text-xs">
+                                <div class="flex justify-end">
+                                    <button onclick="addBaris('fields-b')" class="bg-blue-600 text-white px-2 py-0.5 rounded text-[10px] font-medium"><i class="fas fa-plus"></i> Tambah</button>
+                                </div>
+                                <div id="fields-b" class="space-y-1"></div>
+                                <button onclick="simpanBlok('fields-b','b')" class="w-full bg-gray-600 hover:bg-gray-700 text-white py-1.5 rounded text-[11px] font-bold"><i class="fas fa-save"></i> Simpan sebagai Default</button>
+                            </div>
+                        </details>
+
+                        <!-- ESTIMASI BIAYA -->
+                        <details class="bg-white rounded-lg border border-gray-200">
+                            <summary class="cursor-pointer select-none px-3 py-2 font-bold text-gray-700 text-[11px] uppercase tracking-wider">Estimasi Total Biaya</summary>
+                            <div class="p-3 pt-0 space-y-2 text-xs">
+                                <div class="grid grid-cols-1 gap-1.5">
+                                    <input type="text" id="in-biaya-angka" value="Rp. 13.183.500,-" class="p-1.5 border border-gray-300 rounded font-bold" oninput="updateBiayaHurufOtomatis()">
+                                    <div class="flex gap-1">
+                                        <input type="text" id="in-biaya-huruf" value="Tiga belas juta seratus delapan puluh tiga ribu lima ratus rupiah" class="flex-1 p-1.5 border border-gray-300 rounded italic" oninput="renderLive()">
+                                        <button onclick="updateBiayaHurufOtomatis()" class="bg-gray-500 hover:bg-gray-600 text-white px-2 rounded text-[10px]" title="Buat ulang otomatis dari angka"><i class="fas fa-sync"></i></button>
+                                    </div>
+                                    <p class="text-[10px] text-gray-400 italic">Terbilang otomatis terisi dari angka di atas — boleh diedit manual kalau mau redaksi lain.</p>
+                                </div>
+                                <button onclick="simpanPanel('biaya')" class="w-full bg-gray-600 hover:bg-gray-700 text-white py-1.5 rounded text-[11px] font-bold"><i class="fas fa-save"></i> Simpan sebagai Default</button>
+                            </div>
+                        </details>
+
+                        <!-- EDIT FOOTER MANUALLY -->
+                        <details class="bg-blue-50/80 rounded-lg border border-blue-200">
+                            <summary class="cursor-pointer select-none px-3 py-2 font-bold text-blue-800 text-[11px] uppercase tracking-wider"><i class="fas fa-map-marked-alt"></i> Pengaturan Footer Manual</summary>
+                            <div class="p-3 pt-0 space-y-2 text-xs">
+                                <div>
+                                    <label class="text-gray-600 block mb-0.5 font-medium">Alamat Baris 1 (Kiri)</label>
+                                    <input type="text" id="in-footer-alamat1" value="Jl. Al-Huda No.47 Kel. Laksana, Kec. Kuta Alam Kota Banda Aceh" class="w-full p-1.5 border border-gray-300 rounded" oninput="renderLive()">
+                                </div>
+                                <div>
+                                    <label class="text-gray-600 block mb-0.5 font-medium">Alamat Baris 2 (Kanan)</label>
+                                    <input type="text" id="in-footer-alamat2" value="Jl. Karya No.178B Kel. Sei Agul, Kec. Medan Barat Kota Medan" class="w-full p-1.5 border border-gray-300 rounded" oninput="renderLive()">
+                                </div>
+                                <div class="grid grid-cols-2 gap-2">
+                                    <div>
+                                        <label class="text-gray-600 block mb-0.5 font-medium">Nomor Telepon</label>
+                                        <input type="text" id="in-footer-telp" value="0852 6033 7498" class="w-full p-1.5 border border-gray-300 rounded" oninput="renderLive()">
+                                    </div>
+                                    <div>
+                                        <label class="text-gray-600 block mb-0.5 font-medium">Nama Penandatangan</label>
+                                        <input type="text" id="in-ttd-nama" value="FIRMANSYAH" class="w-full p-1.5 border border-gray-300 rounded font-bold" oninput="renderLive()">
+                                    </div>
+                                </div>
+                                <div class="grid grid-cols-2 gap-2">
+                                    <div>
+                                        <label class="text-gray-600 block mb-0.5 font-medium">Email Kiri</label>
+                                        <input type="text" id="in-footer-email1" value="firmanmajubersama@yahoo.com" class="w-full p-1.5 border border-gray-300 rounded text-[11px]" oninput="renderLive()">
+                                    </div>
+                                    <div>
+                                        <label class="text-gray-600 block mb-0.5 font-medium">Email Kanan</label>
+                                        <input type="text" id="in-footer-email2" value="Office.majubersama@gmail.com" class="w-full p-1.5 border border-gray-300 rounded text-[11px]" oninput="renderLive()">
+                                    </div>
+                                </div>
+                                <button onclick="simpanPanel('footer')" class="w-full bg-blue-700 hover:bg-blue-800 text-white py-1.5 rounded text-[11px] font-bold"><i class="fas fa-save"></i> Simpan sebagai Default</button>
+                            </div>
+                        </details>
+
+                        <!-- TOMBOL CETAK & EXCEL -->
+                        <div class="flex gap-2 pt-1">
+                            <button onclick="window.print()" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-lg text-xs font-bold shadow transition-all"><i class="fas fa-print"></i> CETAK / PRINT PDF</button>
+                            <button onclick="exportExcel()" class="bg-emerald-600 hover:bg-emerald-700 text-white px-4 rounded-lg text-xs font-bold" title="Ekspor Excel"><i class="fas fa-file-excel text-base"></i></button>
+                        </div>
                     </div>
-                    <button onclick="saveTemplate()" class="w-full bg-violet-600 hover:bg-violet-700 text-white py-1.5 rounded text-[11px] font-bold"><i class="fas fa-save"></i> Simpan sebagai Template</button>
-                    <div>
-                        <label class="text-gray-600 block mb-0.5 font-medium">Template Tersimpan di HP ini</label>
+                </details>
+
+                <!-- ====== FOLDER 2: TEMPLATE SURAT (Firestore) ====== -->
+                <details class="bg-violet-50/80 rounded-lg border border-violet-200 shadow-sm">
+                    <summary class="cursor-pointer select-none px-3 py-2 font-bold text-violet-800 text-xs flex items-center gap-2"><i class="fas fa-folder text-violet-500"></i> Template Surat</summary>
+                    <div class="p-3 pt-0 space-y-2 text-xs">
+                        <div>
+                            <label class="text-gray-600 block mb-0.5 font-medium">Judul Surat</label>
+                            <input type="text" id="in-judul-surat" value="Surat Estimasi Biaya Mutasi - SAKYAN" class="w-full p-1.5 border border-gray-300 rounded" oninput="renderLive()">
+                        </div>
+                        <button onclick="saveTemplate()" class="w-full bg-violet-600 hover:bg-violet-700 text-white py-1.5 rounded text-[11px] font-bold"><i class="fas fa-save"></i> Simpan sebagai Template / Buat Baru</button>
+                        <div class="flex items-center justify-between pt-1">
+                            <label class="text-gray-600 font-medium">Template Tersimpan (Firestore)</label>
+                            <button onclick="renderTemplateList()" class="text-[10px] text-violet-700 font-medium"><i class="fas fa-sync"></i> Refresh</button>
+                        </div>
                         <div id="daftar-template" class="space-y-1"></div>
                     </div>
-                </div>
+                </details>
 
-                <!-- EDIT KOP & LOGO (FITUR BARU) -->
-                <div class="bg-amber-50/80 p-3 rounded-lg border border-amber-200 shadow-sm space-y-2 text-xs">
-                    <span class="font-bold text-amber-800 block uppercase tracking-wider text-[11px]"><i class="fas fa-heading"></i> Pengaturan Kop & Logo</span>
-                    <div>
-                        <label class="text-gray-600 block mb-0.5 font-medium">Nama Perusahaan (Header)</label>
-                        <input type="text" id="in-nama-perusahaan" value="CV. MAJU BERSAMA" class="w-full p-1.5 border border-gray-300 rounded" oninput="renderLive()">
-                    </div>
-                    <div>
-                        <label class="text-gray-600 block mb-0.5 font-medium">Upload Logo Perusahaan (Ganti Kotak Default)</label>
-                        <input type="file" id="in-logo-file" accept="image/*" class="w-full p-1 border border-gray-300 rounded bg-white" onchange="handleLogoUpload(this)">
-                    </div>
-                    <button onclick="simpanPanel('kop')" class="w-full bg-amber-600 hover:bg-amber-700 text-white py-1.5 rounded text-[11px] font-bold"><i class="fas fa-save"></i> Simpan sebagai Default</button>
-                </div>
-
-                <!-- Informasi Utama -->
-                <div class="bg-white p-3 rounded-lg border border-gray-200 shadow-sm space-y-2 text-xs">
-                    <span class="font-bold text-gray-700 block uppercase tracking-wider text-[11px]">Informasi Utama</span>
-                    <div class="grid grid-cols-2 gap-2">
-                        <div>
-                            <label class="text-gray-500 block mb-0.5">Tanggal Surat</label>
-                            <input type="text" id="in-tgl" value="Banda Aceh, 24 Juni 2026" class="w-full p-1.5 border border-gray-300 rounded" oninput="renderLive()">
+                <!-- ====== FOLDER 3: RIWAYAT SURAT TERBIT (Firestore) ====== -->
+                <details class="bg-sky-50/80 rounded-lg border border-sky-200 shadow-sm">
+                    <summary class="cursor-pointer select-none px-3 py-2 font-bold text-sky-800 text-xs flex items-center gap-2"><i class="fas fa-folder text-sky-500"></i> Riwayat Surat Terbit</summary>
+                    <div class="p-3 pt-0 space-y-2 text-xs">
+                        <div class="flex items-center justify-between">
+                            <span class="text-gray-500">Daftar nomor surat tersimpan di server</span>
+                            <button onclick="renderRiwayatSurat()" class="text-[10px] text-sky-700 font-medium"><i class="fas fa-sync"></i> Refresh</button>
                         </div>
-                        <div>
-                            <label class="text-gray-500 block mb-0.5">Tipe / Perihal</label>
-                            <input type="text" id="in-perihal" value="MUTASI" class="w-full p-1.5 border border-gray-300 rounded font-bold" oninput="renderLive()">
-                        </div>
+                        <div id="daftar-riwayat-surat" class="space-y-1"></div>
                     </div>
-                    <div>
-                        <label class="text-gray-500 block mb-0.5">Tujuan Surat (Kepada Yth,)</label>
-                        <textarea id="in-tujuan" rows="3" class="w-full p-1.5 border border-gray-300 rounded leading-tight" oninput="renderLive()">Kepada Yth,&#10;PT Mandiri Utama Finance / Bpk SAKYAN&#10;Jl manek Roo 8c & 8d Kuta Padang, Kec. Johan Pahlawan&#10;Meulaboh Aceh Barat</textarea>
-                    </div>
-                    <button onclick="simpanPanel('info')" class="w-full bg-gray-600 hover:bg-gray-700 text-white py-1.5 rounded text-[11px] font-bold"><i class="fas fa-save"></i> Simpan sebagai Default</button>
-                </div>
+                </details>
 
-                <!-- NOMOR SURAT & VERIFIKASI ONLINE (FITUR BARU) -->
-                <div class="bg-emerald-50/80 p-3 rounded-lg border border-emerald-200 shadow-sm space-y-2 text-xs">
-                    <span class="font-bold text-emerald-800 block uppercase tracking-wider text-[11px]"><i class="fas fa-qrcode"></i> Nomor Surat & Verifikasi Online</span>
-                    <div>
-                        <label class="text-gray-600 block mb-0.5 font-medium">Nomor Surat</label>
-                        <div class="flex gap-1">
-                            <input type="text" id="in-nomor-surat" value="" placeholder="contoh: 001/MB/VI/2026" class="flex-1 p-1.5 border border-gray-300 rounded font-bold" oninput="renderLive()">
-                            <button onclick="generateNomorOtomatis()" class="bg-emerald-600 text-white px-2 rounded text-[10px] font-bold whitespace-nowrap"><i class="fas fa-sync"></i> Otomatis</button>
-                        </div>
-                    </div>
-                    <div>
-                        <label class="text-gray-600 block mb-0.5 font-medium">Domain Verifikasi (isi setelah deploy verify.html)</label>
-                        <input type="text" id="in-domain-verifikasi" value="https://mb-office.github.io/surat/verify.html" class="w-full p-1.5 border border-gray-300 rounded text-[10.5px]" oninput="renderLive()">
-                    </div>
-                    <div class="flex gap-1">
-                        <button onclick="simpanPanel('nomor')" class="flex-1 bg-gray-600 hover:bg-gray-700 text-white py-1.5 rounded text-[11px] font-bold"><i class="fas fa-save"></i> Simpan Domain</button>
-                        <button onclick="testBukaDomain()" class="flex-1 bg-gray-400 hover:bg-gray-500 text-white py-1.5 rounded text-[11px] font-bold"><i class="fas fa-external-link-alt"></i> Test Buka</button>
-                    </div>
-                    <button onclick="simpanDanTerbitkan()" class="w-full bg-emerald-700 hover:bg-emerald-800 text-white py-1.5 rounded text-[11px] font-bold"><i class="fas fa-cloud-upload-alt"></i> Simpan & Terbitkan (Update QR)</button>
-                    <button onclick="promptResetNomor()" class="w-full bg-red-50 border border-red-300 text-red-600 hover:bg-red-100 py-1.5 rounded text-[11px] font-bold"><i class="fas fa-undo"></i> Reset Nomor Surat (Bulan Ini)</button>
-                    <p id="status-publish" class="text-[10px] text-gray-500"></p>
-                    <p id="status-koneksi" class="text-[10px] text-gray-400"></p>
-                </div>
-
-                <!-- BLOK DATA A (ASAL) -->
-                <div class="bg-white p-3 rounded-lg border border-gray-200 shadow-sm space-y-2 text-xs">
-                    <div class="flex justify-between items-center">
-                        <span class="font-bold text-gray-700 uppercase text-[11px]">Blok Data Atas (Asal)</span>
-                        <button onclick="addBaris('fields-a')" class="bg-blue-600 text-white px-2 py-0.5 rounded text-[10px] font-medium"><i class="fas fa-plus"></i> Tambah</button>
-                    </div>
-                    <div id="fields-a" class="space-y-1"></div>
-                    <button onclick="simpanBlok('fields-a','a')" class="w-full bg-gray-600 hover:bg-gray-700 text-white py-1.5 rounded text-[11px] font-bold"><i class="fas fa-save"></i> Simpan sebagai Default</button>
-                </div>
-
-                <!-- KALIMAT PENGHUBUNG -->
-                <div class="bg-white p-3 rounded-lg border border-gray-200 shadow-sm text-xs">
-                    <label class="block font-bold text-gray-700 uppercase text-[11px] mb-1">Kalimat Penghubung Tengah</label>
-                    <input type="text" id="in-transisi" value="Data Kendaraaan diatas, akan di MUTASI kan ke nama dibawah ini:" class="w-full p-1.5 border border-gray-300 rounded" oninput="renderLive()">
-                    <button onclick="simpanPanel('transisi')" class="w-full mt-2 bg-gray-600 hover:bg-gray-700 text-white py-1.5 rounded text-[11px] font-bold"><i class="fas fa-save"></i> Simpan sebagai Default</button>
-                </div>
-
-                <!-- BLOK DATA B (TUJUAN) -->
-                <div class="bg-white p-3 rounded-lg border border-gray-200 shadow-sm space-y-2 text-xs">
-                    <div class="flex justify-between items-center">
-                        <span class="font-bold text-gray-700 uppercase text-[11px]">Blok Data Bawah (Tujuan)</span>
-                        <button onclick="addBaris('fields-b')" class="bg-blue-600 text-white px-2 py-0.5 rounded text-[10px] font-medium"><i class="fas fa-plus"></i> Tambah</button>
-                    </div>
-                    <div id="fields-b" class="space-y-1"></div>
-                    <button onclick="simpanBlok('fields-b','b')" class="w-full bg-gray-600 hover:bg-gray-700 text-white py-1.5 rounded text-[11px] font-bold"><i class="fas fa-save"></i> Simpan sebagai Default</button>
-                </div>
-
-                <!-- ESTIMASI BIAYA -->
-                <div class="bg-white p-3 rounded-lg border border-gray-200 shadow-sm space-y-2 text-xs">
-                    <span class="font-bold text-gray-700 uppercase text-[11px]">Estimasi Total Biaya</span>
-                    <div class="grid grid-cols-1 gap-1.5">
-                        <input type="text" id="in-biaya-angka" value="Rp. 13.183.500,-" class="p-1.5 border border-gray-300 rounded font-bold" oninput="updateBiayaHurufOtomatis()">
-                        <div class="flex gap-1">
-                            <input type="text" id="in-biaya-huruf" value="Tiga belas juta seratus delapan puluh tiga ribu lima ratus rupiah" class="flex-1 p-1.5 border border-gray-300 rounded italic" oninput="renderLive()">
-                            <button onclick="updateBiayaHurufOtomatis()" class="bg-gray-500 hover:bg-gray-600 text-white px-2 rounded text-[10px]" title="Buat ulang otomatis dari angka"><i class="fas fa-sync"></i></button>
-                        </div>
-                        <p class="text-[10px] text-gray-400 italic">Terbilang otomatis terisi dari angka di atas — boleh diedit manual kalau mau redaksi lain.</p>
-                    </div>
-                    <button onclick="simpanPanel('biaya')" class="w-full bg-gray-600 hover:bg-gray-700 text-white py-1.5 rounded text-[11px] font-bold"><i class="fas fa-save"></i> Simpan sebagai Default</button>
-                </div>
-
-                <!-- EDIT FOOTER MANUALLY (FITUR BARU) -->
-                <div class="bg-blue-50/80 p-3 rounded-lg border border-blue-200 shadow-sm space-y-2 text-xs">
-                    <span class="font-bold text-blue-800 block uppercase tracking-wider text-[11px]"><i class="fas fa-map-marked-alt"></i> Pengaturan Footer Manual</span>
-                    <div>
-                        <label class="text-gray-600 block mb-0.5 font-medium">Alamat Baris 1 (Kiri)</label>
-                        <input type="text" id="in-footer-alamat1" value="Jl. Al-Huda No.47 Kel. Laksana, Kec. Kuta Alam Kota Banda Aceh" class="w-full p-1.5 border border-gray-300 rounded" oninput="renderLive()">
-                    </div>
-                    <div>
-                        <label class="text-gray-600 block mb-0.5 font-medium">Alamat Baris 2 (Kanan)</label>
-                        <input type="text" id="in-footer-alamat2" value="Jl. Karya No.178B Kel. Sei Agul, Kec. Medan Barat Kota Medan" class="w-full p-1.5 border border-gray-300 rounded" oninput="renderLive()">
-                    </div>
-                    <div class="grid grid-cols-2 gap-2">
-                        <div>
-                            <label class="text-gray-600 block mb-0.5 font-medium">Nomor Telepon</label>
-                            <input type="text" id="in-footer-telp" value="0852 6033 7498" class="w-full p-1.5 border border-gray-300 rounded" oninput="renderLive()">
-                        </div>
-                        <div>
-                            <label class="text-gray-600 block mb-0.5 font-medium">Nama Penandatangan</label>
-                            <input type="text" id="in-ttd-nama" value="FIRMANSYAH" class="w-full p-1.5 border border-gray-300 rounded font-bold" oninput="renderLive()">
-                        </div>
-                    </div>
-                    <div class="grid grid-cols-2 gap-2">
-                        <div>
-                            <label class="text-gray-600 block mb-0.5 font-medium">Email Kiri</label>
-                            <input type="text" id="in-footer-email1" value="firmanmajubersama@yahoo.com" class="w-full p-1.5 border border-gray-300 rounded text-[11px]" oninput="renderLive()">
-                        </div>
-                        <div>
-                            <label class="text-gray-600 block mb-0.5 font-medium">Email Kanan</label>
-                            <input type="text" id="in-footer-email2" value="Office.majubersama@gmail.com" class="w-full p-1.5 border border-gray-300 rounded text-[11px]" oninput="renderLive()">
-                        </div>
-                    </div>
-                    <button onclick="simpanPanel('footer')" class="w-full bg-blue-700 hover:bg-blue-800 text-white py-1.5 rounded text-[11px] font-bold"><i class="fas fa-save"></i> Simpan sebagai Default</button>
-                </div>
-
-                <!-- TOMBOL CETAK & EXCEL -->
-                <div class="flex gap-2 pt-1">
-                    <button onclick="window.print()" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-lg text-xs font-bold shadow transition-all"><i class="fas fa-print"></i> CETAK / PRINT PDF</button>
-                    <button onclick="exportExcel()" class="bg-emerald-600 hover:bg-emerald-700 text-white px-4 rounded-lg text-xs font-bold" title="Ekspor Excel"><i class="fas fa-file-excel text-base"></i></button>
-                </div>
             </div>
+
 
             <!-- SISI KANAN: PREVIEW SURAT -->
             <div id="panel-preview" class="tab-tersembunyi md:block w-full md:w-[58%] p-3 bg-gray-300/70 overflow-y-auto h-full preview-container">
@@ -560,10 +638,8 @@
         ];
 
         window.addEventListener('DOMContentLoaded', () => {
-            buildFormRows('fields-a', muatBlokDefault('a') || initDataA);
-            buildFormRows('fields-b', muatBlokDefault('b') || initDataB);
-            renderTemplateList();
-            muatSemuaPanelDefault();
+            buildFormRows('fields-a', initDataA);
+            buildFormRows('fields-b', initDataB);
             renderLive();
 
             regenerateQRCode("Surat belum diterbitkan secara online - klik 'Simpan & Terbitkan' setelah login & Firebase terhubung.");
@@ -574,12 +650,19 @@
                     if (user) {
                         showApp();
                         cekKoneksiFirebase();
+                        // Semua data (pengaturan default, logo, template, riwayat surat) ditarik dari Firestore setelah login berhasil
+                        muatSemuaPanelDefaultDariServer();
+                        renderTemplateList();
+                        renderRiwayatSurat();
                     } else if (!window.isOfflineMode) {
                         showLogin();
                     }
                 });
             } else {
-                showApp(); // fallback kalau modul Firebase gagal dimuat (mis. tanpa internet)
+                // Modul Firebase gagal dimuat (internet mati / script diblokir) - JANGAN auto-masuk tanpa verifikasi.
+                // Tetap tampilkan layar login; tombol "Lewati (Mode Offline)" tetap ada sebagai pilihan SADAR, bukan otomatis.
+                showLogin();
+                setLoginError('Modul Firebase gagal dimuat (cek koneksi internet Anda). Login tidak bisa diverifikasi sementara — pakai "Lewati (Mode Offline)" kalau cuma mau lihat tampilan tanpa simpan/verifikasi online.');
             }
 
             // Jalankan mode layar hp awal (Sembunyikan preview secara aman)
@@ -612,7 +695,7 @@
             }
         }
 
-        // Handler untuk Upload Logo Baru (tersimpan otomatis ke localStorage agar tidak hilang saat dibuka ulang)
+        // Handler untuk Upload Logo Baru (tersimpan otomatis ke Firestore agar tidak hilang & sama di semua perangkat)
         function setLogo(dataUrl) {
             document.getElementById('default-logo').classList.add('hidden');
             const customLogo = document.getElementById('custom-logo');
@@ -620,21 +703,21 @@
             customLogo.classList.remove('hidden');
         }
 
-        function handleLogoUpload(input) {
+        async function handleLogoUpload(input) {
             const file = input.files[0];
-            if (file) {
-                const reader = new FileReader();
-                reader.onload = function(e) {
-                    setLogo(e.target.result);
-                    try {
-                        localStorage.setItem('mb_logo_dataurl', e.target.result);
-                    } catch (err) {
-                        console.error('Gagal menyimpan logo (file mungkin terlalu besar):', err);
-                        alert('Logo tampil tapi gagal disimpan permanen (ukuran file terlalu besar). Coba pakai gambar yang lebih kecil/dikompres.');
-                    }
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = async function(e) {
+                setLogo(e.target.result);
+                try {
+                    if (!window.fbSaveSettings) throw new Error('Modul Firebase belum termuat.');
+                    await window.fbSaveSettings({ logoDataUrl: e.target.result });
+                } catch (err) {
+                    console.error('Gagal menyimpan logo ke server:', err);
+                    alert('Logo tampil tapi gagal disimpan ke server (mungkin file terlalu besar untuk Firestore, atau koneksi gagal). Coba pakai gambar yang lebih kecil/dikompres.');
                 }
-                reader.readAsDataURL(file);
             }
+            reader.readAsDataURL(file);
         }
 
         function buildFormRows(containerId, dataArr) {
@@ -718,18 +801,8 @@
             });
         }
 
-        // ====== FITUR SIMPAN / MUAT TEMPLATE (tersimpan di localStorage browser HP ini) ======
-        const TEMPLATE_KEY = 'surat_template_list_v1';
-
-        function getAllTemplates() {
-            try {
-                const raw = localStorage.getItem(TEMPLATE_KEY);
-                return raw ? JSON.parse(raw) : [];
-            } catch (e) {
-                console.error('Gagal membaca template tersimpan:', e);
-                return [];
-            }
-        }
+        // ====== FITUR SIMPAN / MUAT TEMPLATE (Firestore, bukan localStorage lagi) ======
+        let templateCache = [];
 
         function getCurrentFormData() {
             const rowsA = Array.from(document.getElementById('fields-a').querySelectorAll('.dynamic-row')).map(r => ({ label: r.querySelector('.f-lbl').value, value: r.querySelector('.f-val').value }));
@@ -754,38 +827,7 @@
             };
         }
 
-        function saveTemplate() {
-            const judul = document.getElementById('in-judul-surat').value.trim();
-            if (!judul) {
-                alert('Isi Judul Surat dulu sebelum menyimpan template.');
-                return;
-            }
-            const data = getCurrentFormData();
-            let list = getAllTemplates();
-            const existingIndex = list.findIndex(t => t.judul.toLowerCase() === judul.toLowerCase());
-            const entry = { judul: judul, data: data, savedAt: new Date().toISOString() };
-            if (existingIndex >= 0) {
-                if (!confirm(`Template dengan judul "${judul}" sudah ada. Timpa / update template tersebut?`)) return;
-                list[existingIndex] = entry;
-            } else {
-                list.push(entry);
-            }
-            try {
-                localStorage.setItem(TEMPLATE_KEY, JSON.stringify(list));
-                renderTemplateList();
-                alert('Template tersimpan di HP ini: "' + judul + '"');
-            } catch (e) {
-                console.error('Gagal menyimpan template:', e);
-                alert('Gagal menyimpan template. Penyimpanan browser mungkin penuh.');
-            }
-        }
-
-        function loadTemplate(index) {
-            const list = getAllTemplates();
-            const entry = list[index];
-            if (!entry) return;
-            const d = entry.data;
-            document.getElementById('in-judul-surat').value = d.judul || '';
+        function isiFormDariData(d) {
             document.getElementById('in-nama-perusahaan').value = d.namaPerusahaan || '';
             document.getElementById('in-tgl').value = d.tgl || '';
             document.getElementById('in-perihal').value = d.perihal || '';
@@ -805,25 +847,59 @@
             if (window.innerWidth <= 768) switchTab('preview');
         }
 
-        function deleteTemplate(index) {
-            const list = getAllTemplates();
-            const entry = list[index];
-            if (!entry) return;
-            if (!confirm(`Hapus template "${entry.judul}"? Tindakan ini tidak bisa dibatalkan.`)) return;
-            list.splice(index, 1);
-            localStorage.setItem(TEMPLATE_KEY, JSON.stringify(list));
-            renderTemplateList();
+        async function saveTemplate() {
+            const judul = document.getElementById('in-judul-surat').value.trim();
+            if (!judul) { alert('Isi Judul Surat dulu sebelum menyimpan template.'); return; }
+            try {
+                if (!window.fbSaveTemplate) throw new Error('Modul Firebase belum termuat.');
+                const data = getCurrentFormData();
+                await window.fbSaveTemplate(judul, data);
+                await renderTemplateList();
+                alert('Template tersimpan ke server (Firestore): "' + judul + '"');
+            } catch (e) {
+                console.error(e);
+                alert('Gagal menyimpan template: ' + e.message + '\n\nPastikan sudah login & Firestore Rules collection "templates" mengizinkan admin membaca/menulis.');
+            }
         }
 
-        function renderTemplateList() {
+        function loadTemplate(index) {
+            const entry = templateCache[index];
+            if (!entry) return;
+            document.getElementById('in-judul-surat').value = entry.judul || '';
+            isiFormDariData(entry.data || {});
+        }
+
+        async function deleteTemplate(index) {
+            const entry = templateCache[index];
+            if (!entry) return;
+            if (!confirm(`Hapus template "${entry.judul}"? Tindakan ini tidak bisa dibatalkan.`)) return;
+            try {
+                await window.fbDeleteTemplate(entry.id);
+                await renderTemplateList();
+            } catch (e) {
+                console.error(e);
+                alert('Gagal menghapus template: ' + e.message);
+            }
+        }
+
+        async function renderTemplateList() {
             const container = document.getElementById('daftar-template');
-            const list = getAllTemplates();
-            if (!list.length) {
+            if (!container) return;
+            container.innerHTML = '<p class="text-gray-400 italic">Memuat dari server...</p>';
+            try {
+                if (!window.fbListTemplates) throw new Error('Modul Firebase belum termuat.');
+                templateCache = await window.fbListTemplates();
+            } catch (e) {
+                console.error(e);
+                container.innerHTML = '<p class="text-red-500 italic">Gagal memuat: ' + e.message + '</p>';
+                return;
+            }
+            if (!templateCache.length) {
                 container.innerHTML = '<p class="text-gray-400 italic">Belum ada template tersimpan.</p>';
                 return;
             }
             container.innerHTML = '';
-            list.forEach((entry, idx) => {
+            templateCache.forEach((entry, idx) => {
                 const row = document.createElement('div');
                 row.className = 'flex items-center gap-1 bg-white border border-gray-200 rounded p-1.5';
                 row.innerHTML = `
@@ -835,6 +911,51 @@
             });
         }
         // ====== AKHIR FITUR TEMPLATE ======
+
+        // ====== RIWAYAT SURAT TERBIT (daftar nomor surat dari Firestore) ======
+        let riwayatCache = [];
+
+        async function renderRiwayatSurat() {
+            const container = document.getElementById('daftar-riwayat-surat');
+            if (!container) return;
+            container.innerHTML = '<p class="text-gray-400 italic">Memuat dari server...</p>';
+            try {
+                if (!window.fbListSurat) throw new Error('Modul Firebase belum termuat.');
+                riwayatCache = await window.fbListSurat(50);
+            } catch (e) {
+                console.error(e);
+                container.innerHTML = '<p class="text-red-500 italic">Gagal memuat: ' + e.message + '</p>';
+                return;
+            }
+            if (!riwayatCache.length) {
+                container.innerHTML = '<p class="text-gray-400 italic">Belum ada surat yang diterbitkan.</p>';
+                return;
+            }
+            container.innerHTML = '';
+            riwayatCache.forEach((entry, idx) => {
+                const tgl = entry.diterbitkanPada ? new Date(entry.diterbitkanPada).toLocaleDateString('id-ID') : '-';
+                const row = document.createElement('div');
+                row.className = 'flex items-center gap-1 bg-white border border-gray-200 rounded p-1.5';
+                row.innerHTML = `
+                    <div class="flex-1 truncate">
+                        <span class="block font-bold text-[11px]">${entry.nomor || '-'}</span>
+                        <span class="block text-[10px] text-gray-500 truncate">${entry.judul || '(tanpa judul)'} &middot; ${tgl}</span>
+                    </div>
+                    <button onclick="muatRiwayat(${idx})" class="bg-sky-600 text-white px-2 py-0.5 rounded text-[10px]"><i class="fas fa-eye"></i> Lihat</button>
+                `;
+                container.appendChild(row);
+            });
+        }
+
+        function muatRiwayat(index) {
+            const entry = riwayatCache[index];
+            if (!entry) return;
+            document.getElementById('in-judul-surat').value = entry.judul || '';
+            document.getElementById('in-nomor-surat').value = entry.nomor || '';
+            isiFormDariData(entry);
+            alert('Data surat nomor "' + (entry.nomor || '-') + '" sudah dimuat ke form — bisa dilihat ulang atau dicetak ulang.');
+        }
+        // ====== AKHIR RIWAYAT SURAT ======
 
         // ====== LOGIN ADMIN (Firebase Auth) ======
         function setLoginError(msg) {
@@ -1013,7 +1134,7 @@
             footer: ['in-footer-alamat1', 'in-footer-alamat2', 'in-footer-telp', 'in-footer-email1', 'in-footer-email2', 'in-ttd-nama']
         };
 
-        function simpanPanel(key) {
+        async function simpanPanel(key) {
             const fields = PANEL_FIELDS[key];
             if (!fields) return;
             const data = {};
@@ -1022,54 +1143,48 @@
                 if (el) data[id] = el.value;
             });
             try {
-                localStorage.setItem('panel_default_' + key, JSON.stringify(data));
-                alert('Tersimpan. Pengaturan ini akan otomatis terisi lagi tiap kali aplikasi dibuka.');
+                if (!window.fbSaveSettings) throw new Error('Modul Firebase belum termuat.');
+                await window.fbSaveSettings({ [key]: data });
+                alert('Tersimpan ke server. Pengaturan ini otomatis terisi lagi di perangkat manapun saat login.');
             } catch (e) {
                 console.error(e);
-                alert('Gagal menyimpan: ' + e.message);
+                alert('Gagal menyimpan ke server: ' + e.message);
             }
         }
 
-        function muatSemuaPanelDefault() {
-            Object.keys(PANEL_FIELDS).forEach(key => {
-                try {
-                    const raw = localStorage.getItem('panel_default_' + key);
-                    if (!raw) return;
-                    const data = JSON.parse(raw);
+        async function muatSemuaPanelDefaultDariServer() {
+            try {
+                if (!window.fbLoadSettings) return;
+                const settings = await window.fbLoadSettings();
+                Object.keys(PANEL_FIELDS).forEach(key => {
+                    const data = settings[key];
+                    if (!data) return;
                     Object.keys(data).forEach(id => {
                         const el = document.getElementById(id);
                         if (el) el.value = data[id];
                     });
-                } catch (e) { console.error('Gagal memuat panel ' + key, e); }
-            });
-
-            try {
-                const logoSimpanan = localStorage.getItem('mb_logo_dataurl');
-                if (logoSimpanan) setLogo(logoSimpanan);
-            } catch (e) { console.error(e); }
+                });
+                if (settings.logoDataUrl) setLogo(settings.logoDataUrl);
+                if (settings.blokA) buildFormRows('fields-a', settings.blokA);
+                if (settings.blokB) buildFormRows('fields-b', settings.blokB);
+                renderLive();
+            } catch (e) {
+                console.error('Gagal memuat pengaturan default dari server:', e);
+            }
         }
 
-        function simpanBlok(containerId, key) {
+        async function simpanBlok(containerId, key) {
             const rows = Array.from(document.getElementById(containerId).querySelectorAll('.dynamic-row')).map(r => ({
                 label: r.querySelector('.f-lbl').value,
                 value: r.querySelector('.f-val').value
             }));
             try {
-                localStorage.setItem('blok_default_' + key, JSON.stringify(rows));
-                alert('Tersimpan sebagai default. Daftar field ini akan otomatis muncul tiap kali aplikasi dibuka.');
+                if (!window.fbSaveSettings) throw new Error('Modul Firebase belum termuat.');
+                await window.fbSaveSettings({ ['blok' + key.toUpperCase()]: rows });
+                alert('Tersimpan ke server sebagai default. Daftar field ini otomatis muncul tiap login.');
             } catch (e) {
                 console.error(e);
-                alert('Gagal menyimpan: ' + e.message);
-            }
-        }
-
-        function muatBlokDefault(key) {
-            try {
-                const raw = localStorage.getItem('blok_default_' + key);
-                return raw ? JSON.parse(raw) : null;
-            } catch (e) {
-                console.error(e);
-                return null;
+                alert('Gagal menyimpan ke server: ' + e.message);
             }
         }
 
