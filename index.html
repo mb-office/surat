@@ -12,6 +12,8 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
     <!-- SheetJS -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <!-- PDF.js (ekstraksi teks asli dari PDF, bukan OCR) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
     <!-- Firebase (Auth + Firestore) untuk Login Admin & Verifikasi Online QR -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
@@ -84,6 +86,19 @@
             const token = buatTokenAcak();
             await setDoc(doc(db, "surat", token), { nomor, token, ...data, diterbitkanPada: new Date().toISOString() });
             return token;
+        };
+
+        // Update surat yang SUDAH ada (dipakai saat re-publish nomor yang sama) - supaya tidak bikin dokumen duplikat baru
+        window.fbUpdateSurat = async (token, nomor, data) => {
+            if (!firebaseReady) throw new Error("Firebase belum terhubung.");
+            await setDoc(doc(db, "surat", token), { nomor, token, ...data, diterbitkanPada: new Date().toISOString() });
+            return token;
+        };
+
+        // Hapus 1 surat tertentu dari riwayat (berdasarkan token/doc id)
+        window.fbDeleteSurat = async (token) => {
+            if (!firebaseReady) throw new Error("Firebase belum terhubung.");
+            await deleteDoc(doc(db, "surat", token));
         };
 
         // Tes koneksi nyata: berhasil baca dokumen di koleksi 'counters' artinya Auth + Firestore + Rules semuanya aktif
@@ -228,11 +243,16 @@
                 width: 210mm !important;
                 min-height: 297mm !important;
                 height: auto !important;
-                padding: 15mm 15mm !important;
+                padding: 20mm 18mm !important;
                 box-shadow: none !important;
                 border: none !important;
                 transform: scale(1) !important;
                 margin: 0 auto !important;
+            }
+            #print-area-wrapper {
+                width: auto !important;
+                height: auto !important;
+                overflow: visible !important;
             }
         }
 
@@ -248,24 +268,12 @@
             .preview-container {
                 padding: 4px !important;
             }
-            #print-area {
-                width: 210mm;
-                transform: scale(0.42);
-                transform-origin: top center;
-                margin-bottom: -150mm;
-            }
             /* Trik khusus swap tab agar printer HP tidak menganggap konten kosong */
             .tab-tersembunyi {
                 position: absolute !important;
                 opacity: 0 !important;
                 pointer-events: none !important;
                 z-index: -10;
-            }
-        }
-        @media (max-width: 480px) {
-            #print-area {
-                transform: scale(0.35);
-                margin-bottom: -180mm;
             }
         }
     </style>
@@ -290,8 +298,25 @@
             </div>
             <p id="login-error" class="text-xs text-red-600 hidden"></p>
             <button onclick="doLogin()" class="w-full bg-[#1E255E] hover:bg-[#11153B] text-white py-2 rounded-lg text-sm font-bold">Masuk</button>
-            <button onclick="skipLogin()" class="w-full text-gray-400 hover:text-gray-600 text-[11px] py-1">Lewati (Mode Offline — tanpa simpan/verifikasi online)</button>
-            <p class="text-[10px] text-gray-400 text-center pt-1">Belum bisa login? Pastikan Firebase Config sudah diisi & akun admin sudah dibuat di Firebase Console &gt; Authentication.</p>
+            <button onclick="skipLogin()" class="w-full text-gray-400 hover:text-gray-600 text-[13px] py-1">Lewati (Mode Offline — tanpa simpan/verifikasi online)</button>
+            <p class="text-[12px] text-gray-400 text-center pt-1">Belum bisa login? Pastikan Firebase Config sudah diisi & akun admin sudah dibuat di Firebase Console &gt; Authentication.</p>
+        </div>
+    </div>
+
+    <!-- MODAL KONFIRMASI PASSWORD (pengganti prompt() bawaan browser yang tidak disensor) -->
+    <div id="password-modal" class="no-print fixed inset-0 bg-gray-900/80 z-[10000] flex items-center justify-center p-4 hidden">
+        <div class="bg-white rounded-xl shadow-2xl p-5 w-full max-w-sm space-y-3">
+            <div class="flex items-center gap-2">
+                <i class="fas fa-lock text-red-500 text-lg"></i>
+                <h3 class="font-bold text-gray-800 text-sm">Konfirmasi Password</h3>
+            </div>
+            <p id="password-modal-msg" class="text-[13px] text-gray-600"></p>
+            <input type="password" id="password-modal-input" class="w-full p-2 border border-gray-300 rounded text-sm" placeholder="Masukkan password login Anda" autocomplete="current-password">
+            <p id="password-modal-error" class="text-[12px] text-red-600 hidden"></p>
+            <div class="flex gap-2 pt-1">
+                <button onclick="passwordModalBatal()" class="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 py-2 rounded-lg text-sm font-bold">Batal</button>
+                <button onclick="passwordModalKonfirmasi()" class="flex-1 bg-red-600 hover:bg-red-700 text-white py-2 rounded-lg text-sm font-bold">Konfirmasi</button>
+            </div>
         </div>
     </div>
 
@@ -302,7 +327,7 @@
         <div class="no-print h-10 bg-gray-100/90 flex items-center justify-between px-4 border-b border-gray-200 shrink-0">
             <div class="flex items-center gap-2">
                 <span class="w-3 h-3 rounded-full bg-gray-300"></span>
-                <span class="text-xs font-bold text-gray-700 tracking-wide">Panel Pembuat Surat — Kontrol Kustomisasi Penuh</span>
+                <span class="text-xs font-bold text-gray-700 tracking-wide">Panel Pembuat Surat — Kontrol Kustomisasi Penuh <span class="text-gray-400 font-normal">v2.0</span></span>
             </div>
             <button onclick="doLogout()" class="text-xs text-gray-500 hover:text-red-600 font-medium"><i class="fas fa-sign-out-alt"></i> Keluar</button>
         </div>
@@ -323,14 +348,14 @@
             <!-- SISI KIRI: INPUT FORM -->
             <div id="panel-input" class="w-full md:w-[42%] border-r border-gray-200 p-3 overflow-y-auto space-y-2 bg-gray-50/60 h-full">
 
-                <!-- ====== FOLDER 1: BUAT / EDIT SURAT ====== -->
-                <details open class="bg-white rounded-lg border border-gray-200 shadow-sm">
-                    <summary class="cursor-pointer select-none px-3 py-2 font-bold text-gray-700 text-xs flex items-center gap-2"><i class="fas fa-folder-open text-amber-500"></i> Buat / Edit Surat</summary>
+                <!-- ====== FOLDER 1: PENGATURAN APLIKASI (set sekali, jarang berubah) ====== -->
+                <details class="bg-white rounded-lg border border-gray-200 shadow-sm">
+                    <summary class="cursor-pointer select-none px-3 py-2 font-bold text-gray-700 text-xs flex items-center gap-2"><i class="fas fa-cog text-gray-500"></i> Pengaturan Aplikasi</summary>
                     <div class="p-2 pl-3 space-y-2 border-t border-gray-100 ml-1 border-l border-gray-200">
 
                         <!-- EDIT KOP & LOGO -->
                         <details class="bg-amber-50/80 rounded-lg border border-amber-200">
-                            <summary class="cursor-pointer select-none px-3 py-2 font-bold text-amber-800 text-[11px] uppercase tracking-wider"><i class="fas fa-heading"></i> Pengaturan Kop & Logo</summary>
+                            <summary class="cursor-pointer select-none px-3 py-2 font-bold text-amber-800 text-[13px] uppercase tracking-wider"><i class="fas fa-heading"></i> Pengaturan Kop & Logo</summary>
                             <div class="p-3 pt-0 space-y-2 text-xs">
                                 <div>
                                     <label class="text-gray-600 block mb-0.5 font-medium">Nama Perusahaan (Header)</label>
@@ -340,110 +365,29 @@
                                     <label class="text-gray-600 block mb-0.5 font-medium">Upload Logo Perusahaan (Ganti Kotak Default)</label>
                                     <input type="file" id="in-logo-file" accept="image/*" class="w-full p-1 border border-gray-300 rounded bg-white" onchange="handleLogoUpload(this)">
                                 </div>
-                                <button onclick="simpanPanel('kop')" class="w-full bg-amber-600 hover:bg-amber-700 text-white py-1.5 rounded text-[11px] font-bold"><i class="fas fa-save"></i> Simpan sebagai Default</button>
+                                <button onclick="simpanPanel('kop')" class="w-full bg-amber-600 hover:bg-amber-700 text-white py-1.5 rounded text-[13px] font-bold"><i class="fas fa-save"></i> Simpan sebagai Default</button>
                             </div>
                         </details>
 
-                        <!-- Informasi Utama -->
-                        <details class="bg-white rounded-lg border border-gray-200">
-                            <summary class="cursor-pointer select-none px-3 py-2 font-bold text-gray-700 text-[11px] uppercase tracking-wider">Informasi Utama</summary>
+                        <!-- DOMAIN VERIFIKASI -->
+                        <details class="bg-emerald-50/80 rounded-lg border border-emerald-200">
+                            <summary class="cursor-pointer select-none px-3 py-2 font-bold text-emerald-800 text-[13px] uppercase tracking-wider"><i class="fas fa-link"></i> Domain Verifikasi QR</summary>
                             <div class="p-3 pt-0 space-y-2 text-xs">
-                                <div class="grid grid-cols-2 gap-2">
-                                    <div>
-                                        <label class="text-gray-500 block mb-0.5">Tanggal Surat</label>
-                                        <input type="text" id="in-tgl" value="Banda Aceh, 24 Juni 2026" class="w-full p-1.5 border border-gray-300 rounded" oninput="renderLive()">
-                                    </div>
-                                    <div>
-                                        <label class="text-gray-500 block mb-0.5">Tipe / Perihal</label>
-                                        <input type="text" id="in-perihal" value="MUTASI" class="w-full p-1.5 border border-gray-300 rounded font-bold" oninput="renderLive()">
-                                    </div>
-                                </div>
-                                <div>
-                                    <label class="text-gray-500 block mb-0.5">Tujuan Surat (Kepada Yth,)</label>
-                                    <textarea id="in-tujuan" rows="3" class="w-full p-1.5 border border-gray-300 rounded leading-tight" oninput="renderLive()">Kepada Yth,&#10;PT Mandiri Utama Finance / Bpk SAKYAN&#10;Jl manek Roo 8c & 8d Kuta Padang, Kec. Johan Pahlawan&#10;Meulaboh Aceh Barat</textarea>
-                                </div>
-                                <button onclick="simpanPanel('info')" class="w-full bg-gray-600 hover:bg-gray-700 text-white py-1.5 rounded text-[11px] font-bold"><i class="fas fa-save"></i> Simpan sebagai Default</button>
-                            </div>
-                        </details>
-
-                        <!-- NOMOR SURAT & VERIFIKASI ONLINE -->
-                        <details open class="bg-emerald-50/80 rounded-lg border border-emerald-200">
-                            <summary class="cursor-pointer select-none px-3 py-2 font-bold text-emerald-800 text-[11px] uppercase tracking-wider"><i class="fas fa-qrcode"></i> Nomor Surat & Verifikasi Online</summary>
-                            <div class="p-3 pt-0 space-y-2 text-xs">
-                                <div>
-                                    <label class="text-gray-600 block mb-0.5 font-medium">Nomor Surat</label>
-                                    <div class="flex gap-1">
-                                        <input type="text" id="in-nomor-surat" value="" placeholder="contoh: 001/MB/VI/2026" class="flex-1 p-1.5 border border-gray-300 rounded font-bold" oninput="renderLive()">
-                                        <button onclick="generateNomorOtomatis()" class="bg-emerald-600 text-white px-2 rounded text-[10px] font-bold whitespace-nowrap"><i class="fas fa-sync"></i> Otomatis</button>
-                                    </div>
-                                </div>
                                 <div>
                                     <label class="text-gray-600 block mb-0.5 font-medium">Domain Verifikasi (isi setelah deploy verify.html)</label>
-                                    <input type="text" id="in-domain-verifikasi" value="https://mb-office.github.io/surat/verify.html" class="w-full p-1.5 border border-gray-300 rounded text-[10.5px]" oninput="renderLive()">
+                                    <input type="text" id="in-domain-verifikasi" value="https://mb-office.github.io/surat/verify.html" class="w-full p-1.5 border border-gray-300 rounded text-[12px]" oninput="renderLive()">
                                 </div>
                                 <div class="flex gap-1">
-                                    <button onclick="simpanPanel('nomor')" class="flex-1 bg-gray-600 hover:bg-gray-700 text-white py-1.5 rounded text-[11px] font-bold"><i class="fas fa-save"></i> Simpan Domain</button>
-                                    <button onclick="testBukaDomain()" class="flex-1 bg-gray-400 hover:bg-gray-500 text-white py-1.5 rounded text-[11px] font-bold"><i class="fas fa-external-link-alt"></i> Test Buka</button>
+                                    <button onclick="simpanPanel('nomor')" class="flex-1 bg-gray-600 hover:bg-gray-700 text-white py-1.5 rounded text-[13px] font-bold"><i class="fas fa-save"></i> Simpan Domain</button>
+                                    <button onclick="testBukaDomain()" class="flex-1 bg-gray-400 hover:bg-gray-500 text-white py-1.5 rounded text-[13px] font-bold"><i class="fas fa-external-link-alt"></i> Test Buka</button>
                                 </div>
-                                <button onclick="simpanDanTerbitkan()" class="w-full bg-emerald-700 hover:bg-emerald-800 text-white py-1.5 rounded text-[11px] font-bold"><i class="fas fa-cloud-upload-alt"></i> Simpan & Terbitkan (Update QR)</button>
-                                <button onclick="promptResetNomor()" class="w-full bg-red-50 border border-red-300 text-red-600 hover:bg-red-100 py-1.5 rounded text-[11px] font-bold"><i class="fas fa-undo"></i> Reset Nomor Surat (Bulan Ini)</button>
-                                <p id="status-publish" class="text-[10px] text-gray-500"></p>
-                                <p id="status-koneksi" class="text-[10px] text-gray-400"></p>
-                            </div>
-                        </details>
-
-                        <!-- BLOK DATA A (ASAL) -->
-                        <details class="bg-white rounded-lg border border-gray-200">
-                            <summary class="cursor-pointer select-none px-3 py-2 font-bold text-gray-700 text-[11px] uppercase tracking-wider">Blok Data Atas (Asal)</summary>
-                            <div class="p-3 pt-0 space-y-2 text-xs">
-                                <div class="flex justify-end">
-                                    <button onclick="addBaris('fields-a')" class="bg-blue-600 text-white px-2 py-0.5 rounded text-[10px] font-medium"><i class="fas fa-plus"></i> Tambah</button>
-                                </div>
-                                <div id="fields-a" class="space-y-1"></div>
-                                <button onclick="simpanBlok('fields-a','a')" class="w-full bg-gray-600 hover:bg-gray-700 text-white py-1.5 rounded text-[11px] font-bold"><i class="fas fa-save"></i> Simpan sebagai Default</button>
-                            </div>
-                        </details>
-
-                        <!-- KALIMAT PENGHUBUNG -->
-                        <details class="bg-white rounded-lg border border-gray-200">
-                            <summary class="cursor-pointer select-none px-3 py-2 font-bold text-gray-700 text-[11px] uppercase tracking-wider">Kalimat Penghubung Tengah</summary>
-                            <div class="p-3 pt-0 text-xs">
-                                <input type="text" id="in-transisi" value="Data Kendaraaan diatas, akan di MUTASI kan ke nama dibawah ini:" class="w-full p-1.5 border border-gray-300 rounded" oninput="renderLive()">
-                                <button onclick="simpanPanel('transisi')" class="w-full mt-2 bg-gray-600 hover:bg-gray-700 text-white py-1.5 rounded text-[11px] font-bold"><i class="fas fa-save"></i> Simpan sebagai Default</button>
-                            </div>
-                        </details>
-
-                        <!-- BLOK DATA B (TUJUAN) -->
-                        <details class="bg-white rounded-lg border border-gray-200">
-                            <summary class="cursor-pointer select-none px-3 py-2 font-bold text-gray-700 text-[11px] uppercase tracking-wider">Blok Data Bawah (Tujuan)</summary>
-                            <div class="p-3 pt-0 space-y-2 text-xs">
-                                <div class="flex justify-end">
-                                    <button onclick="addBaris('fields-b')" class="bg-blue-600 text-white px-2 py-0.5 rounded text-[10px] font-medium"><i class="fas fa-plus"></i> Tambah</button>
-                                </div>
-                                <div id="fields-b" class="space-y-1"></div>
-                                <button onclick="simpanBlok('fields-b','b')" class="w-full bg-gray-600 hover:bg-gray-700 text-white py-1.5 rounded text-[11px] font-bold"><i class="fas fa-save"></i> Simpan sebagai Default</button>
-                            </div>
-                        </details>
-
-                        <!-- ESTIMASI BIAYA -->
-                        <details class="bg-white rounded-lg border border-gray-200">
-                            <summary class="cursor-pointer select-none px-3 py-2 font-bold text-gray-700 text-[11px] uppercase tracking-wider">Estimasi Total Biaya</summary>
-                            <div class="p-3 pt-0 space-y-2 text-xs">
-                                <div class="grid grid-cols-1 gap-1.5">
-                                    <input type="text" id="in-biaya-angka" value="Rp. 13.183.500,-" class="p-1.5 border border-gray-300 rounded font-bold" oninput="updateBiayaHurufOtomatis()">
-                                    <div class="flex gap-1">
-                                        <input type="text" id="in-biaya-huruf" value="Tiga belas juta seratus delapan puluh tiga ribu lima ratus rupiah" class="flex-1 p-1.5 border border-gray-300 rounded italic" oninput="renderLive()">
-                                        <button onclick="updateBiayaHurufOtomatis()" class="bg-gray-500 hover:bg-gray-600 text-white px-2 rounded text-[10px]" title="Buat ulang otomatis dari angka"><i class="fas fa-sync"></i></button>
-                                    </div>
-                                    <p class="text-[10px] text-gray-400 italic">Terbilang otomatis terisi dari angka di atas — boleh diedit manual kalau mau redaksi lain.</p>
-                                </div>
-                                <button onclick="simpanPanel('biaya')" class="w-full bg-gray-600 hover:bg-gray-700 text-white py-1.5 rounded text-[11px] font-bold"><i class="fas fa-save"></i> Simpan sebagai Default</button>
+                                <p id="status-koneksi" class="text-[12px] text-gray-400"></p>
                             </div>
                         </details>
 
                         <!-- EDIT FOOTER MANUALLY -->
                         <details class="bg-blue-50/80 rounded-lg border border-blue-200">
-                            <summary class="cursor-pointer select-none px-3 py-2 font-bold text-blue-800 text-[11px] uppercase tracking-wider"><i class="fas fa-map-marked-alt"></i> Pengaturan Footer Manual</summary>
+                            <summary class="cursor-pointer select-none px-3 py-2 font-bold text-blue-800 text-[13px] uppercase tracking-wider"><i class="fas fa-map-marked-alt"></i> Pengaturan Footer Manual</summary>
                             <div class="p-3 pt-0 space-y-2 text-xs">
                                 <div>
                                     <label class="text-gray-600 block mb-0.5 font-medium">Alamat Baris 1 (Kiri)</label>
@@ -466,14 +410,109 @@
                                 <div class="grid grid-cols-2 gap-2">
                                     <div>
                                         <label class="text-gray-600 block mb-0.5 font-medium">Email Kiri</label>
-                                        <input type="text" id="in-footer-email1" value="firmanmajubersama@yahoo.com" class="w-full p-1.5 border border-gray-300 rounded text-[11px]" oninput="renderLive()">
+                                        <input type="text" id="in-footer-email1" value="firmanmajubersama@yahoo.com" class="w-full p-1.5 border border-gray-300 rounded text-[13px]" oninput="renderLive()">
                                     </div>
                                     <div>
                                         <label class="text-gray-600 block mb-0.5 font-medium">Email Kanan</label>
-                                        <input type="text" id="in-footer-email2" value="Office.majubersama@gmail.com" class="w-full p-1.5 border border-gray-300 rounded text-[11px]" oninput="renderLive()">
+                                        <input type="text" id="in-footer-email2" value="Office.majubersama@gmail.com" class="w-full p-1.5 border border-gray-300 rounded text-[13px]" oninput="renderLive()">
                                     </div>
                                 </div>
-                                <button onclick="simpanPanel('footer')" class="w-full bg-blue-700 hover:bg-blue-800 text-white py-1.5 rounded text-[11px] font-bold"><i class="fas fa-save"></i> Simpan sebagai Default</button>
+                                <button onclick="simpanPanel('footer')" class="w-full bg-blue-700 hover:bg-blue-800 text-white py-1.5 rounded text-[13px] font-bold"><i class="fas fa-save"></i> Simpan sebagai Default</button>
+                            </div>
+                        </details>
+
+                    </div>
+                </details>
+
+                <!-- ====== FOLDER 1B: INPUT SURAT (field yang ganti-ganti per surat) ====== -->
+                <details open class="bg-white rounded-lg border border-gray-200 shadow-sm">
+                    <summary class="cursor-pointer select-none px-3 py-2 font-bold text-gray-700 text-xs flex items-center gap-2"><i class="fas fa-folder-open text-amber-500"></i> Input Surat</summary>
+                    <div class="p-2 pl-3 space-y-2 border-t border-gray-100 ml-1 border-l border-gray-200">
+
+                        <!-- Informasi Utama -->
+                        <details class="bg-white rounded-lg border border-gray-200">
+                            <summary class="cursor-pointer select-none px-3 py-2 font-bold text-gray-700 text-[13px] uppercase tracking-wider">Informasi Utama</summary>
+                            <div class="p-3 pt-0 space-y-2 text-xs">
+                                <div class="grid grid-cols-2 gap-2">
+                                    <div>
+                                        <label class="text-gray-500 block mb-0.5">Tanggal Surat</label>
+                                        <input type="text" id="in-tgl" value="Banda Aceh, 24 Juni 2026" class="w-full p-1.5 border border-gray-300 rounded" oninput="renderLive()">
+                                    </div>
+                                    <div>
+                                        <label class="text-gray-500 block mb-0.5">Tipe / Perihal</label>
+                                        <input type="text" id="in-perihal" value="MUTASI" class="w-full p-1.5 border border-gray-300 rounded font-bold" oninput="renderLive()">
+                                    </div>
+                                </div>
+                                <div>
+                                    <label class="text-gray-500 block mb-0.5">Tujuan Surat (Kepada Yth,)</label>
+                                    <textarea id="in-tujuan" rows="3" class="w-full p-1.5 border border-gray-300 rounded leading-tight" oninput="renderLive()">Kepada Yth,&#10;PT Mandiri Utama Finance / Bpk SAKYAN&#10;Jl manek Roo 8c & 8d Kuta Padang, Kec. Johan Pahlawan&#10;Meulaboh Aceh Barat</textarea>
+                                </div>
+                            </div>
+                        </details>
+
+                        <!-- NOMOR SURAT & TERBITKAN -->
+                        <details open class="bg-emerald-50/80 rounded-lg border border-emerald-200">
+                            <summary class="cursor-pointer select-none px-3 py-2 font-bold text-emerald-800 text-[13px] uppercase tracking-wider"><i class="fas fa-qrcode"></i> Nomor Surat & Terbitkan</summary>
+                            <div class="p-3 pt-0 space-y-2 text-xs">
+                                <div id="status-terbit-badge" class="px-2 py-1.5 rounded text-center font-bold text-[12px] bg-amber-100 text-amber-700 border border-amber-300">🟡 DRAFT — belum diterbitkan online (QR belum aktif)</div>
+                                <div>
+                                    <label class="text-gray-600 block mb-0.5 font-medium">Nomor Surat</label>
+                                    <div class="flex gap-1">
+                                        <input type="text" id="in-nomor-surat" value="" placeholder="contoh: 001/MB/VI/2026" class="flex-1 p-1.5 border border-gray-300 rounded font-bold" oninput="renderLive()">
+                                        <button onclick="generateNomorOtomatis()" class="bg-emerald-600 text-white px-2 rounded text-[12px] font-bold whitespace-nowrap"><i class="fas fa-sync"></i> Otomatis</button>
+                                    </div>
+                                </div>
+                                <button onclick="simpanDanTerbitkan()" class="w-full bg-emerald-700 hover:bg-emerald-800 text-white py-1.5 rounded text-[13px] font-bold"><i class="fas fa-cloud-upload-alt"></i> Simpan & Terbitkan (Update QR)</button>
+                                <button onclick="promptResetNomor()" class="w-full bg-red-50 border border-red-300 text-red-600 hover:bg-red-100 py-1.5 rounded text-[13px] font-bold"><i class="fas fa-undo"></i> Reset Nomor Surat (Bulan Ini)</button>
+                                <p id="status-publish" class="text-[12px] text-gray-500"></p>
+                            </div>
+                        </details>
+
+                        <!-- BLOK DATA A (ASAL) -->
+                        <details class="bg-white rounded-lg border border-gray-200">
+                            <summary class="cursor-pointer select-none px-3 py-2 font-bold text-gray-700 text-[13px] uppercase tracking-wider">Blok Data Atas (Asal)</summary>
+                            <div class="p-3 pt-0 space-y-2 text-xs">
+                                <div class="flex justify-end">
+                                    <button onclick="addBaris('fields-a')" class="bg-blue-600 text-white px-2 py-0.5 rounded text-[12px] font-medium"><i class="fas fa-plus"></i> Tambah</button>
+                                </div>
+                                <div id="fields-a" class="space-y-1"></div>
+                                <button onclick="simpanBlok('fields-a','a')" class="w-full bg-gray-600 hover:bg-gray-700 text-white py-1.5 rounded text-[13px] font-bold"><i class="fas fa-save"></i> Simpan sebagai Default</button>
+                            </div>
+                        </details>
+
+                        <!-- KALIMAT PENGHUBUNG -->
+                        <details class="bg-white rounded-lg border border-gray-200">
+                            <summary class="cursor-pointer select-none px-3 py-2 font-bold text-gray-700 text-[13px] uppercase tracking-wider">Kalimat Penghubung Tengah</summary>
+                            <div class="p-3 pt-0 text-xs">
+                                <input type="text" id="in-transisi" value="Data Kendaraaan diatas, akan di MUTASI kan ke nama dibawah ini:" class="w-full p-1.5 border border-gray-300 rounded" oninput="renderLive()">
+                                <button onclick="simpanPanel('transisi')" class="w-full mt-2 bg-gray-600 hover:bg-gray-700 text-white py-1.5 rounded text-[13px] font-bold"><i class="fas fa-save"></i> Simpan sebagai Default</button>
+                            </div>
+                        </details>
+
+                        <!-- BLOK DATA B (TUJUAN) -->
+                        <details class="bg-white rounded-lg border border-gray-200">
+                            <summary class="cursor-pointer select-none px-3 py-2 font-bold text-gray-700 text-[13px] uppercase tracking-wider">Blok Data Bawah (Tujuan)</summary>
+                            <div class="p-3 pt-0 space-y-2 text-xs">
+                                <div class="flex justify-end">
+                                    <button onclick="addBaris('fields-b')" class="bg-blue-600 text-white px-2 py-0.5 rounded text-[12px] font-medium"><i class="fas fa-plus"></i> Tambah</button>
+                                </div>
+                                <div id="fields-b" class="space-y-1"></div>
+                                <button onclick="simpanBlok('fields-b','b')" class="w-full bg-gray-600 hover:bg-gray-700 text-white py-1.5 rounded text-[13px] font-bold"><i class="fas fa-save"></i> Simpan sebagai Default</button>
+                            </div>
+                        </details>
+
+                        <!-- ESTIMASI BIAYA -->
+                        <details class="bg-white rounded-lg border border-gray-200">
+                            <summary class="cursor-pointer select-none px-3 py-2 font-bold text-gray-700 text-[13px] uppercase tracking-wider">Estimasi Total Biaya</summary>
+                            <div class="p-3 pt-0 space-y-2 text-xs">
+                                <div class="grid grid-cols-1 gap-1.5">
+                                    <input type="text" id="in-biaya-angka" value="Rp. 13.183.500,-" class="p-1.5 border border-gray-300 rounded font-bold" oninput="updateBiayaHurufOtomatis()">
+                                    <div class="flex gap-1">
+                                        <input type="text" id="in-biaya-huruf" value="Tiga belas juta seratus delapan puluh tiga ribu lima ratus rupiah" class="flex-1 p-1.5 border border-gray-300 rounded italic" oninput="renderLive()">
+                                        <button onclick="updateBiayaHurufOtomatis()" class="bg-gray-500 hover:bg-gray-600 text-white px-2 rounded text-[12px]" title="Buat ulang otomatis dari angka"><i class="fas fa-sync"></i></button>
+                                    </div>
+                                    <p class="text-[12px] text-gray-400 italic">Terbilang otomatis terisi dari angka di atas — boleh diedit manual kalau mau redaksi lain.</p>
+                                </div>
                             </div>
                         </details>
 
@@ -493,12 +532,31 @@
                             <label class="text-gray-600 block mb-0.5 font-medium">Judul Surat</label>
                             <input type="text" id="in-judul-surat" value="Surat Estimasi Biaya Mutasi - SAKYAN" class="w-full p-1.5 border border-gray-300 rounded" oninput="renderLive()">
                         </div>
-                        <button onclick="saveTemplate()" class="w-full bg-violet-600 hover:bg-violet-700 text-white py-1.5 rounded text-[11px] font-bold"><i class="fas fa-save"></i> Simpan sebagai Template / Buat Baru</button>
+                        <button onclick="saveTemplate()" class="w-full bg-violet-600 hover:bg-violet-700 text-white py-1.5 rounded text-[13px] font-bold"><i class="fas fa-save"></i> Simpan sebagai Template / Buat Baru</button>
                         <div class="flex items-center justify-between pt-1">
                             <label class="text-gray-600 font-medium">Template Tersimpan (Firestore)</label>
-                            <button onclick="renderTemplateList()" class="text-[10px] text-violet-700 font-medium"><i class="fas fa-sync"></i> Refresh</button>
+                            <button onclick="renderTemplateList()" class="text-[12px] text-violet-700 font-medium"><i class="fas fa-sync"></i> Refresh</button>
                         </div>
+                        <input type="text" oninput="cariTemplate(this.value)" placeholder="Cari judul template..." class="w-full p-1.5 border border-gray-300 rounded text-[12px]">
                         <div id="daftar-template" class="space-y-1"></div>
+                    </div>
+                </details>
+
+                <!-- ====== FOLDER: UPLOAD SURAT DARI PDF ====== -->
+                <details class="bg-rose-50/80 rounded-lg border border-rose-200 shadow-sm">
+                    <summary class="cursor-pointer select-none px-3 py-2 font-bold text-rose-800 text-xs flex items-center gap-2"><i class="fas fa-folder text-rose-500"></i> Upload Surat dari PDF</summary>
+                    <div class="p-3 pt-0 space-y-2 text-xs">
+                        <div>
+                            <label class="text-gray-600 block mb-0.5 font-medium">Pilih file PDF surat</label>
+                            <input type="file" id="in-pdf-upload" accept="application/pdf" class="w-full p-1 border border-gray-300 rounded bg-white">
+                        </div>
+                        <button onclick="bacaPDF()" class="w-full bg-rose-600 hover:bg-rose-700 text-white py-1.5 rounded text-[13px] font-bold"><i class="fas fa-file-import"></i> Baca & Isi Otomatis ke Form</button>
+                        <p id="status-pdf" class="text-[12px] text-gray-500"></p>
+                        <details class="text-[12px] text-gray-400">
+                            <summary class="cursor-pointer">Lihat teks mentah hasil ekstraksi (untuk koreksi manual)</summary>
+                            <textarea id="pdf-raw-text" rows="6" class="w-full mt-1 p-1.5 border border-gray-200 rounded text-[12px] font-mono" readonly></textarea>
+                        </details>
+                        <p class="text-[12px] text-gray-400 italic">Hanya bisa membaca PDF yang teksnya asli/bisa di-select (bukan hasil scan foto). Hasil otomatis tetap bisa dikoreksi manual di form "Buat / Edit Surat" di atas.</p>
                     </div>
                 </details>
 
@@ -508,12 +566,15 @@
                     <div class="p-3 pt-0 space-y-2 text-xs">
                         <div class="flex items-center justify-between">
                             <span class="text-gray-500">Daftar nomor surat tersimpan di server</span>
-                            <button onclick="renderRiwayatSurat()" class="text-[10px] text-sky-700 font-medium"><i class="fas fa-sync"></i> Refresh</button>
+                            <button onclick="renderRiwayatSurat()" class="text-[12px] text-sky-700 font-medium"><i class="fas fa-sync"></i> Refresh</button>
                         </div>
+                        <input type="text" oninput="cariRiwayat(this.value)" placeholder="Cari nomor / judul surat..." class="w-full p-1.5 border border-gray-300 rounded text-[12px]">
                         <div id="daftar-riwayat-surat" class="space-y-1"></div>
-                        <button onclick="promptResetRiwayat()" class="w-full bg-red-50 border border-red-300 text-red-600 hover:bg-red-100 py-1.5 rounded text-[11px] font-bold"><i class="fas fa-trash"></i> Reset Riwayat Surat (Hapus Semua)</button>
+                        <button onclick="promptResetRiwayat()" class="w-full bg-red-50 border border-red-300 text-red-600 hover:bg-red-100 py-1.5 rounded text-[13px] font-bold"><i class="fas fa-trash"></i> Reset Riwayat Surat (Hapus Semua)</button>
                     </div>
                 </details>
+
+                <p class="text-center text-[12px] text-gray-400 pt-2 pb-1">Sistem Surat CV. Maju Bersama &middot; v2.0<br>Copyright &copy;2026 SRISP.</p>
 
             </div>
 
@@ -521,8 +582,11 @@
             <!-- SISI KANAN: PREVIEW SURAT -->
             <div id="panel-preview" class="tab-tersembunyi md:block w-full md:w-[58%] p-3 bg-gray-300/70 overflow-y-auto h-full preview-container">
                 <div class="w-full flex justify-center items-start">
+                    <!-- Pembungkus dinamis: ukurannya dihitung pas dengan #print-area yang sudah diskalakan,
+                         supaya surat selalu tampil PENUH (tidak terpotong) di lebar layar apapun -->
+                    <div id="print-area-wrapper" style="overflow:hidden; position:relative;">
                     <!-- KERTAS SURAT ELEGAN (A4) -->
-                    <div id="print-area" class="w-[210mm] min-h-[297mm] bg-white shadow-2xl p-6 sm:p-10 border border-gray-400 rounded-sm relative flex flex-col justify-between shrink-0 md:scale-[0.80] lg:scale-[0.85] origin-top">
+                    <div id="print-area" class="w-[210mm] min-h-[297mm] bg-white shadow-2xl p-8 sm:p-12 border border-gray-400 rounded-sm relative flex flex-col justify-between shrink-0 origin-top-left">
                         
                         <div>
                             <!-- KOP SURAT ASLI -->
@@ -538,7 +602,7 @@
                             </div>
                             
                             <!-- Garis Pembatas Kop (4 segmen: abu-abu, biru muda, biru tua, navy - sesuai KOP asli) -->
-                            <div class="h-[3.5px] w-full mb-1" style="background: linear-gradient(to right, #9CA3AF 0%, #9CA3AF 46%, #2190BC 46%, #2190BC 62%, #34507C 62%, #34507C 69%, #1E255E 69%, #1E255E 100%);"></div>
+                            <div class="h-[7px] w-full mb-1" style="background: linear-gradient(to right, #9CA3AF 0%, #9CA3AF 46%, #2190BC 46%, #2190BC 62%, #34507C 62%, #34507C 69%, #1E255E 69%, #1E255E 100%);"></div>
 
                             <!-- Nomor Surat & Tanggal Berkas -->
                             <div class="flex justify-between items-end surat-font font-normal mb-5 text-gray-900">
@@ -583,7 +647,7 @@
                                     <!-- QR Code Validasi -->
                                     <div class="flex items-center gap-2 border border-gray-300 p-1 rounded bg-gray-50/40 w-[210px] shadow-sm">
                                         <div id="qrcode" class="bg-white p-0.5 shrink-0"></div>
-                                        <div class="text-[9px] text-gray-500 leading-tight">
+                                        <div class="text-[13px] text-gray-500 leading-tight">
                                             <span class="text-green-700 font-bold block"><i class="fas fa-check-circle"></i> DOKUMEN VALID</span>
                                             Scan otomatis untuk verifikasi sistem online perusahaan.
                                         </div>
@@ -599,7 +663,7 @@
                                 </div>
 
                                 <!-- INFORMASI ALAMAT FOOTER EDITABLE (sesuai KOP asli: ikon 1x per baris + garis pembatas vertikal) -->
-                                <div class="border-t border-gray-300 pt-2 text-[9.5px] text-gray-800 font-sans space-y-1">
+                                <div class="border-t border-gray-300 pt-2 text-[13px] text-gray-800 font-sans space-y-1">
                                     <div class="flex items-start gap-2">
                                         <i class="fas fa-map-marker-alt text-gray-800 mt-0.5 w-3 text-center shrink-0"></i>
                                         <div class="flex-1 grid grid-cols-2 gap-x-3">
@@ -618,11 +682,12 @@
                                             <span id="view-footer-email2" class="text-blue-700 underline">...</span>
                                         </div>
                                     </div>
-                                    <div class="h-[5px] w-full mt-1.5" style="background: linear-gradient(to right, #2190BC 0%, #2190BC 38%, #1E255E 38%, #1E255E 100%);"></div>
+                                    <div class="h-[10px] w-full mt-1.5" style="background: linear-gradient(to right, #2190BC 0%, #2190BC 38%, #1E255E 38%, #1E255E 100%);"></div>
                                 </div>
                             </div>
 
                         </div>
+                    </div>
                     </div>
                 </div>
 
@@ -666,6 +731,7 @@
                         sudahPernahLogin = true;
                         logoutManual = false;
                         showApp();
+                        setTimeout(sesuaikanSkalaPreview, 100);
                         cekKoneksiFirebase();
                         // Semua data (pengaturan default, logo, template, riwayat surat) ditarik dari Firestore setelah login berhasil
                         muatSemuaPanelDefaultDariServer();
@@ -682,7 +748,7 @@
                             const statusEl = document.getElementById('status-koneksi');
                             if (statusEl) {
                                 statusEl.textContent = '⚠️ Koneksi sempat terputus, mencoba menyambung ulang...';
-                                statusEl.className = 'text-[10px] text-amber-600 font-medium';
+                                statusEl.className = 'text-[12px] text-amber-600 font-medium';
                             }
                         }
                     }
@@ -702,6 +768,7 @@
             }
 
             renderLive();
+            setTimeout(sesuaikanSkalaPreview, 100);
         });
 
         // Trik khusus agar swap tab tidak mematikan elemen cetak di browser HP
@@ -722,7 +789,36 @@
                 panelInput.classList.add('tab-tersembunyi');
                 panelPreview.classList.remove('tab-tersembunyi');
             }
+            setTimeout(sesuaikanSkalaPreview, 50);
         }
+
+        // ====== SKALA PREVIEW OTOMATIS (supaya surat selalu tampil PENUH, tidak terpotong, di lebar layar apapun) ======
+        function sesuaikanSkalaPreview() {
+            const wrapper = document.getElementById('panel-preview');
+            const printArea = document.getElementById('print-area');
+            const printWrapper = document.getElementById('print-area-wrapper');
+            if (!wrapper || !printArea || !printWrapper) return;
+            if (wrapper.classList.contains('tab-tersembunyi') || wrapper.offsetParent === null) return; // sedang tersembunyi, lewati
+
+            const tersedia = wrapper.clientWidth - 24; // dikurangi padding panel
+            if (tersedia <= 0) return;
+
+            printArea.style.transform = 'scale(1)';
+            const asliW = printArea.offsetWidth;
+            const asliH = printArea.offsetHeight;
+            if (!asliW || !asliH) return;
+
+            let skala = tersedia / asliW;
+            if (skala > 1) skala = 1;
+            if (skala < 0.2) skala = 0.2;
+
+            printArea.style.transform = 'scale(' + skala + ')';
+            printWrapper.style.width = Math.ceil(asliW * skala) + 'px';
+            printWrapper.style.height = Math.ceil(asliH * skala) + 'px';
+        }
+
+        window.addEventListener('resize', () => setTimeout(sesuaikanSkalaPreview, 50));
+        // ====== AKHIR SKALA PREVIEW OTOMATIS ======
 
         // Handler untuk Upload Logo Baru (tersimpan otomatis ke Firestore agar tidak hilang & sama di semua perangkat)
         function setLogo(dataUrl) {
@@ -756,8 +852,8 @@
                 const div = document.createElement('div');
                 div.className = "flex gap-1 items-center dynamic-row";
                 div.innerHTML = `
-                    <input type="text" value="${item.label}" class="w-1/3 p-1 text-[11px] border border-gray-300 rounded font-semibold f-lbl" oninput="renderLive()">
-                    <input type="text" value="${item.value}" class="w-2/3 p-1 text-[11px] border border-gray-300 rounded f-val" oninput="renderLive()">
+                    <input type="text" value="${item.label}" class="w-1/3 p-1 text-[13px] border border-gray-300 rounded font-semibold f-lbl" oninput="renderLive()">
+                    <input type="text" value="${item.value}" class="w-2/3 p-1 text-[13px] border border-gray-300 rounded f-val" oninput="renderLive()">
                     <button onclick="this.parentElement.remove(); renderLive();" class="text-red-500 px-1"><i class="fas fa-minus-circle text-xs"></i></button>
                 `;
                 container.appendChild(div);
@@ -769,15 +865,46 @@
             const div = document.createElement('div');
             div.className = "flex gap-1 items-center dynamic-row";
             div.innerHTML = `
-                <input type="text" value="BARIS BARU" class="w-1/3 p-1 text-[11px] border border-gray-300 rounded font-semibold f-lbl" oninput="renderLive()">
-                <input type="text" value="Isian baru..." class="w-2/3 p-1 text-[11px] border border-gray-300 rounded f-val" oninput="renderLive()">
+                <input type="text" value="BARIS BARU" class="w-1/3 p-1 text-[13px] border border-gray-300 rounded font-semibold f-lbl" oninput="renderLive()">
+                <input type="text" value="Isian baru..." class="w-2/3 p-1 text-[13px] border border-gray-300 rounded f-val" oninput="renderLive()">
                 <button onclick="this.parentElement.remove(); renderLive();" class="text-red-500 px-1"><i class="fas fa-minus-circle text-xs"></i></button>
             `;
             container.appendChild(div);
             renderLive();
         }
 
+        // ====== TANDA PERUBAHAN BELUM DISIMPAN & STATUS TERBIT ======
+        let adaPerubahanBelumDisimpan = false;
+        let renderLivePertamaKali = true;
+
+        function perbaruiStatusTerbit(sudahTerbit) {
+            const badge = document.getElementById('status-terbit-badge');
+            if (!badge) return;
+            if (sudahTerbit) {
+                badge.className = 'px-2 py-1.5 rounded text-center font-bold text-[12px] bg-green-100 text-green-700 border border-green-300';
+                badge.textContent = '🟢 SUDAH DITERBITKAN — QR aktif & tersimpan di server';
+            } else {
+                badge.className = 'px-2 py-1.5 rounded text-center font-bold text-[12px] bg-amber-100 text-amber-700 border border-amber-300';
+                badge.textContent = '🟡 DRAFT — belum diterbitkan online (QR belum aktif)';
+            }
+        }
+
+        window.addEventListener('beforeunload', (e) => {
+            if (adaPerubahanBelumDisimpan) {
+                e.preventDefault();
+                e.returnValue = '';
+            }
+        });
+        // ====== AKHIR TANDA PERUBAHAN ======
+
         function renderLive() {
+            // Tandai ada perubahan yang belum diterbitkan (kecuali saat pertama kali halaman dimuat)
+            if (!renderLivePertamaKali) {
+                adaPerubahanBelumDisimpan = true;
+                perbaruiStatusTerbit(false);
+            }
+            renderLivePertamaKali = false;
+
             // Update Judul Surat & Nomor Surat
             document.getElementById('view-judul-surat').innerText = document.getElementById('in-judul-surat').value;
             const nomorVal = document.getElementById('in-nomor-surat').value.trim();
@@ -923,21 +1050,34 @@
                 container.innerHTML = '<p class="text-red-500 italic">Gagal memuat: ' + e.message + '</p>';
                 return;
             }
-            if (!templateCache.length) {
-                container.innerHTML = '<p class="text-gray-400 italic">Belum ada template tersimpan.</p>';
+            tampilkanDaftarTemplate(templateCache);
+        }
+
+        function tampilkanDaftarTemplate(list) {
+            const container = document.getElementById('daftar-template');
+            if (!list.length) {
+                container.innerHTML = '<p class="text-gray-400 italic">Belum ada template tersimpan / tidak ada hasil pencarian.</p>';
                 return;
             }
             container.innerHTML = '';
-            templateCache.forEach((entry, idx) => {
+            list.forEach((entry) => {
+                const idx = templateCache.indexOf(entry);
                 const row = document.createElement('div');
                 row.className = 'flex items-center gap-1 bg-white border border-gray-200 rounded p-1.5';
                 row.innerHTML = `
-                    <span class="flex-1 truncate text-[11px] font-medium">${entry.judul}</span>
-                    <button onclick="loadTemplate(${idx})" class="bg-blue-600 text-white px-2 py-0.5 rounded text-[10px]"><i class="fas fa-folder-open"></i> Muat</button>
-                    <button onclick="deleteTemplate(${idx})" class="bg-red-500 text-white px-2 py-0.5 rounded text-[10px]"><i class="fas fa-trash"></i></button>
+                    <span class="flex-1 truncate text-[13px] font-medium">${entry.judul}</span>
+                    <button onclick="loadTemplate(${idx})" class="bg-blue-600 text-white px-2 py-0.5 rounded text-[12px]"><i class="fas fa-folder-open"></i> Muat</button>
+                    <button onclick="deleteTemplate(${idx})" class="bg-red-500 text-white px-2 py-0.5 rounded text-[12px]"><i class="fas fa-trash"></i></button>
                 `;
                 container.appendChild(row);
             });
+        }
+
+        function cariTemplate(kw) {
+            kw = kw.trim().toLowerCase();
+            if (!kw) { tampilkanDaftarTemplate(templateCache); return; }
+            const hasil = templateCache.filter(e => (e.judul || '').toLowerCase().includes(kw));
+            tampilkanDaftarTemplate(hasil);
         }
         // ====== AKHIR FITUR TEMPLATE ======
 
@@ -956,24 +1096,52 @@
                 container.innerHTML = '<p class="text-red-500 italic">Gagal memuat: ' + e.message + '</p>';
                 return;
             }
-            if (!riwayatCache.length) {
-                container.innerHTML = '<p class="text-gray-400 italic">Belum ada surat yang diterbitkan.</p>';
+            tampilkanDaftarRiwayat(riwayatCache);
+        }
+
+        function tampilkanDaftarRiwayat(list) {
+            const container = document.getElementById('daftar-riwayat-surat');
+            if (!list.length) {
+                container.innerHTML = '<p class="text-gray-400 italic">Belum ada surat yang diterbitkan / tidak ada hasil pencarian.</p>';
                 return;
             }
             container.innerHTML = '';
-            riwayatCache.forEach((entry, idx) => {
+            list.forEach((entry) => {
+                const idx = riwayatCache.indexOf(entry);
                 const tgl = entry.diterbitkanPada ? new Date(entry.diterbitkanPada).toLocaleDateString('id-ID') : '-';
                 const row = document.createElement('div');
                 row.className = 'flex items-center gap-1 bg-white border border-gray-200 rounded p-1.5';
                 row.innerHTML = `
                     <div class="flex-1 truncate">
-                        <span class="block font-bold text-[11px]">${entry.nomor || '-'}</span>
-                        <span class="block text-[10px] text-gray-500 truncate">${entry.judul || '(tanpa judul)'} &middot; ${tgl}</span>
+                        <span class="block font-bold text-[13px]">${entry.nomor || '-'}</span>
+                        <span class="block text-[12px] text-gray-500 truncate">${entry.judul || '(tanpa judul)'} &middot; ${tgl}</span>
                     </div>
-                    <button onclick="muatRiwayat(${idx})" class="bg-sky-600 text-white px-2 py-0.5 rounded text-[10px]"><i class="fas fa-eye"></i> Lihat</button>
+                    <button onclick="muatRiwayat(${idx})" class="bg-sky-600 text-white px-2 py-0.5 rounded text-[12px]"><i class="fas fa-eye"></i> Lihat</button>
+                    <button onclick="hapusSatuRiwayat(${idx})" class="bg-red-500 text-white px-2 py-0.5 rounded text-[12px]"><i class="fas fa-trash"></i></button>
                 `;
                 container.appendChild(row);
             });
+        }
+
+        function cariRiwayat(kw) {
+            kw = kw.trim().toLowerCase();
+            if (!kw) { tampilkanDaftarRiwayat(riwayatCache); return; }
+            const hasil = riwayatCache.filter(e => (e.nomor || '').toLowerCase().includes(kw) || (e.judul || '').toLowerCase().includes(kw));
+            tampilkanDaftarRiwayat(hasil);
+        }
+
+        async function hapusSatuRiwayat(index) {
+            const entry = riwayatCache[index];
+            if (!entry) return;
+            if (!confirm(`Hapus riwayat surat "${entry.nomor || '-'}" (${entry.judul || 'tanpa judul'})?\n\nQR di surat fisik yang sudah dicetak tidak akan bisa diverifikasi lagi setelah ini.`)) return;
+            try {
+                if (!window.fbDeleteSurat) throw new Error('Modul Firebase belum termuat.');
+                await window.fbDeleteSurat(entry.id);
+                await renderRiwayatSurat();
+            } catch (e) {
+                console.error(e);
+                alert('Gagal menghapus: ' + e.message);
+            }
         }
 
         function muatRiwayat(index) {
@@ -982,12 +1150,50 @@
             document.getElementById('in-judul-surat').value = entry.judul || '';
             document.getElementById('in-nomor-surat').value = entry.nomor || '';
             isiFormDariData(entry);
+            // Tandai surat ini sebagai surat yang SUDAH terbit (re-publish nanti akan update, bukan duplikat baru)
+            tokenAktif = entry.id || null;
+            nomorTerakhirDiterbitkan = entry.nomor || null;
+            adaPerubahanBelumDisimpan = false;
+            perbaruiStatusTerbit(true);
             alert('Data surat nomor "' + (entry.nomor || '-') + '" sudah dimuat ke form — bisa dilihat ulang atau dicetak ulang.');
         }
+        // ====== MODAL KONFIRMASI PASSWORD (pengganti prompt() bawaan) ======
+        let _passwordModalResolve = null;
+
+        function mintaPasswordModal(pesan) {
+            return new Promise((resolve) => {
+                _passwordModalResolve = resolve;
+                document.getElementById('password-modal-msg').textContent = pesan;
+                document.getElementById('password-modal-input').value = '';
+                document.getElementById('password-modal-error').classList.add('hidden');
+                document.getElementById('password-modal').classList.remove('hidden');
+                document.getElementById('password-modal-input').focus();
+            });
+        }
+
+        function passwordModalKonfirmasi() {
+            const val = document.getElementById('password-modal-input').value;
+            if (!val) {
+                document.getElementById('password-modal-error').textContent = 'Password tidak boleh kosong.';
+                document.getElementById('password-modal-error').classList.remove('hidden');
+                return;
+            }
+            document.getElementById('password-modal').classList.add('hidden');
+            if (_passwordModalResolve) _passwordModalResolve(val);
+            _passwordModalResolve = null;
+        }
+
+        function passwordModalBatal() {
+            document.getElementById('password-modal').classList.add('hidden');
+            if (_passwordModalResolve) _passwordModalResolve(null);
+            _passwordModalResolve = null;
+        }
+        // ====== AKHIR MODAL PASSWORD ======
+
         async function promptResetRiwayat() {
             const lanjut = confirm('HAPUS SEMUA riwayat surat yang tersimpan di server?\n\nPERINGATAN: Surat yang sudah dicetak & QR-nya sudah dibagikan TIDAK AKAN BISA diverifikasi lagi setelah ini (link verifikasi jadi "tidak ditemukan"). Nomor urut bulanan TIDAK ikut ter-reset (pakai tombol Reset Nomor terpisah kalau perlu).\n\nLanjutkan?');
             if (!lanjut) return;
-            const password = prompt('Untuk keamanan, masukkan ulang PASSWORD login Anda:');
+            const password = await mintaPasswordModal('Untuk keamanan, masukkan ulang password login Anda sebelum menghapus SEMUA riwayat surat.');
             if (!password) return;
             try {
                 if (!window.fbResetRiwayatSurat) throw new Error('Modul Firebase belum termuat.');
@@ -1000,6 +1206,168 @@
             }
         }
         // ====== AKHIR RIWAYAT SURAT ======
+
+        // ====== UPLOAD SURAT DARI PDF (ekstraksi teks asli via PDF.js, BUKAN OCR) ======
+        if (window.pdfjsLib) {
+            pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+        }
+
+        async function ekstrakTeksPDF(file) {
+            const arrayBuffer = await file.arrayBuffer();
+            const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+            let teksLengkap = '';
+            for (let i = 1; i <= pdf.numPages; i++) {
+                const page = await pdf.getPage(i);
+                const content = await page.getTextContent();
+                // Kelompokkan item teks per baris berdasarkan posisi Y supaya urutan baris tidak hilang
+                const baris = {};
+                content.items.forEach(item => {
+                    const y = Math.round(item.transform[5]);
+                    if (!baris[y]) baris[y] = [];
+                    baris[y].push(item.str);
+                });
+                const yTersortir = Object.keys(baris).map(Number).sort((a, b) => b - a);
+                teksLengkap += yTersortir.map(y => baris[y].join(' ')).join('\n') + '\n';
+            }
+            return teksLengkap;
+        }
+
+        function ekstrakBlokAB(teks) {
+            const startIdx = teks.indexOf('berikut :');
+            const endIdx = teks.indexOf('Dengan estimasi total biaya');
+            if (startIdx === -1 || endIdx === -1 || endIdx <= startIdx) return { rowsA: [], rowsB: [], transisi: '' };
+            const segmen = teks.slice(startIdx + 'berikut :'.length, endIdx);
+            const baris = segmen.split('\n').map(b => b.trim()).filter(b => b.length > 0);
+
+            const rowsA = [], rowsB = [];
+            const transisiBaris = [];
+            let mode = 'before_A';
+
+            baris.forEach(b => {
+                const m = b.match(/^([^\n:]{2,30}?)\s*:\s*(.+)$/);
+                if (m) {
+                    const item = { label: m[1].trim(), value: m[2].trim() };
+                    if (mode === 'before_A' || mode === 'in_A') { mode = 'in_A'; rowsA.push(item); }
+                    else { mode = 'in_B'; rowsB.push(item); }
+                } else {
+                    if (mode === 'in_A') { mode = 'transisi'; transisiBaris.push(b); }
+                    else if (mode === 'transisi') { transisiBaris.push(b); }
+                    else if (mode === 'in_B' && rowsB.length) { rowsB[rowsB.length - 1].value += ' ' + b; }
+                }
+            });
+
+            return { rowsA, rowsB, transisi: transisiBaris.join(' ').trim() };
+        }
+
+        function parseSuratPDFText(teks) {
+            const hasil = {};
+
+            let m = teks.match(/(\d{1,4}\/MB\/[IVXLCM]+\/\d{4})/);
+            if (m) hasil.nomor = m[1];
+
+            m = teks.match(/([A-Za-z. ]+,\s*\d{1,2}\s+\w+\s+\d{4})/);
+            if (m) hasil.tgl = m[1].trim();
+
+            m = teks.match(/\d{4}\s*\n([\s\S]*?)\nKepada Yth/);
+            if (m) hasil.judul = m[1].replace(/\n/g, ' ').trim();
+
+            m = teks.match(/(Kepada Yth,[\s\S]*?)\n\s*Dengan Hormat\./);
+            if (m) hasil.tujuan = m[1].trim();
+
+            m = teks.match(/pengurusan\s*:\s*([A-Z\s]+?)\s+dengan data/i);
+            if (m) hasil.perihal = m[1].trim();
+
+            m = teks.match(/sebesar\s*(Rp\.?\s*[\d.,]+\s*,?-?)\s*\(\s*([^)]+)\)/i);
+            if (m) { hasil.biayaAngka = m[1].trim(); hasil.biayaHuruf = m[2].trim(); }
+
+            const blok = ekstrakBlokAB(teks);
+            hasil.rowsA = blok.rowsA;
+            hasil.rowsB = blok.rowsB;
+            hasil.transisi = blok.transisi;
+
+            // Footer: ambil bagian setelah penutup surat
+            const ekorIdx = teks.indexOf('kerjasamanya kami ucapkan terima kasih.');
+            const ekor = ekorIdx !== -1 ? teks.slice(ekorIdx) : '';
+            const alamatMatches = [...ekor.matchAll(/((?:Jl\.|Jalan)[^\n]+)/gi)].map(x => x[1].trim());
+            if (alamatMatches[0]) hasil.footerAlamat1 = alamatMatches[0];
+            if (alamatMatches[1]) hasil.footerAlamat2 = alamatMatches[1];
+
+            m = ekor.match(/\b(0\d[\d\s-]{7,15}\d)\b/);
+            if (m) hasil.footerTelp = m[1].trim();
+
+            const emailMatches = [...ekor.matchAll(/([\w.+-]+@[\w-]+\.[\w.-]+)/g)].map(x => x[1].trim());
+            if (emailMatches[0]) hasil.footerEmail1 = emailMatches[0];
+            if (emailMatches[1]) hasil.footerEmail2 = emailMatches[1];
+
+            m = ekor.match(/Hormat Kami,\s*\n([^\n]+)\n+([^\n@]+?)\n/);
+            if (m) { hasil.namaPerusahaan = m[1].trim(); hasil.ttdNama = m[2].trim(); }
+
+            return hasil;
+        }
+
+        function terapkanHasilPDF(hasil) {
+            let jumlah = 0;
+            const isi = (id, val) => {
+                if (val) { document.getElementById(id).value = val; jumlah++; }
+            };
+            isi('in-nomor-surat', hasil.nomor);
+            isi('in-tgl', hasil.tgl);
+            isi('in-judul-surat', hasil.judul);
+            isi('in-tujuan', hasil.tujuan);
+            isi('in-perihal', hasil.perihal);
+            isi('in-transisi', hasil.transisi);
+            isi('in-biaya-angka', hasil.biayaAngka);
+            isi('in-biaya-huruf', hasil.biayaHuruf);
+            isi('in-footer-alamat1', hasil.footerAlamat1);
+            isi('in-footer-alamat2', hasil.footerAlamat2);
+            isi('in-footer-telp', hasil.footerTelp);
+            isi('in-footer-email1', hasil.footerEmail1);
+            isi('in-footer-email2', hasil.footerEmail2);
+            isi('in-nama-perusahaan', hasil.namaPerusahaan);
+            isi('in-ttd-nama', hasil.ttdNama);
+
+            if (hasil.rowsA && hasil.rowsA.length) { buildFormRows('fields-a', hasil.rowsA); jumlah++; }
+            if (hasil.rowsB && hasil.rowsB.length) { buildFormRows('fields-b', hasil.rowsB); jumlah++; }
+
+            renderLive();
+            return jumlah;
+        }
+
+        async function bacaPDF() {
+            const fileInput = document.getElementById('in-pdf-upload');
+            const statusEl = document.getElementById('status-pdf');
+            const rawEl = document.getElementById('pdf-raw-text');
+
+            if (!fileInput.files || !fileInput.files[0]) { alert('Pilih file PDF dulu.'); return; }
+            if (!window.pdfjsLib) { alert('Modul PDF.js belum termuat (cek koneksi internet).'); return; }
+
+            statusEl.textContent = 'Membaca PDF...';
+            rawEl.value = '';
+
+            try {
+                const teks = await ekstrakTeksPDF(fileInput.files[0]);
+                rawEl.value = teks;
+
+                if (teks.trim().length < 20) {
+                    statusEl.textContent = '⚠️ PDF ini sepertinya hasil scan/gambar tanpa teks asli — tidak bisa dibaca otomatis. Isi manual saja.';
+                    return;
+                }
+
+                const hasil = parseSuratPDFText(teks);
+                const jumlah = terapkanHasilPDF(hasil);
+
+                statusEl.textContent = jumlah > 0
+                    ? `Selesai. ${jumlah} bagian terisi otomatis ke form di atas — cek & koreksi manual kalau ada yang kurang pas.`
+                    : 'PDF terbaca tapi tidak ada field yang cocok dikenali. Lihat teks mentah di bawah, isi manual.';
+
+                if (window.innerWidth <= 768) switchTab('input');
+            } catch (e) {
+                console.error(e);
+                statusEl.textContent = '';
+                alert('Gagal membaca PDF: ' + e.message);
+            }
+        }
+        // ====== AKHIR UPLOAD SURAT DARI PDF ======
 
         // ====== LOGIN ADMIN (Firebase Auth) ======
         function setLoginError(msg) {
@@ -1035,6 +1403,7 @@
         function skipLogin() {
             window.isOfflineMode = true;
             showApp();
+            setTimeout(sesuaikanSkalaPreview, 100);
         }
 
         async function doLogout() {
@@ -1050,19 +1419,19 @@
             const statusEl = document.getElementById('status-koneksi');
             if (!statusEl) return;
             statusEl.textContent = 'Memeriksa koneksi server...';
-            statusEl.className = 'text-[10px] text-gray-400';
+            statusEl.className = 'text-[12px] text-gray-400';
             if (!window.fbTestConnection) {
                 statusEl.textContent = '❌ Modul Firebase tidak termuat (cek internet).';
-                statusEl.className = 'text-[10px] text-red-600 font-medium';
+                statusEl.className = 'text-[12px] text-red-600 font-medium';
                 return;
             }
             const hasil = await window.fbTestConnection();
             if (hasil.ok) {
                 statusEl.textContent = '✅ Server terhubung (Login, Database & Rules aktif).';
-                statusEl.className = 'text-[10px] text-green-600 font-medium';
+                statusEl.className = 'text-[12px] text-green-600 font-medium';
             } else {
                 statusEl.textContent = '❌ Belum terhubung: ' + hasil.error;
-                statusEl.className = 'text-[10px] text-red-600 font-medium';
+                statusEl.className = 'text-[12px] text-red-600 font-medium';
             }
         }
 
@@ -1086,15 +1455,31 @@
             qrInstance = new QRCode(el, { text: text, width: 50, height: 50 });
         }
 
+        // Lacak surat yang sedang aktif diedit (token + nomor) supaya re-publish meng-UPDATE, bukan bikin dokumen baru
+        let tokenAktif = null;
+        let nomorTerakhirDiterbitkan = null;
+
         async function simpanDanTerbitkan() {
             const nomor = document.getElementById('in-nomor-surat').value.trim();
             if (!nomor) { alert('Isi atau klik "Otomatis" untuk Nomor Surat dulu sebelum menyimpan & menerbitkan.'); return; }
             const statusEl = document.getElementById('status-publish');
             statusEl.textContent = 'Menyimpan ke server...';
             try {
-                if (!window.fbSaveSurat) throw new Error('Modul Firebase belum termuat.');
                 const data = getCurrentFormData();
-                const token = await window.fbSaveSurat(nomor, data);
+                let token;
+                if (tokenAktif && nomor === nomorTerakhirDiterbitkan) {
+                    // Nomor surat sama dengan yang terakhir diterbitkan -> UPDATE dokumen yang sama, jangan bikin baru
+                    if (!window.fbUpdateSurat) throw new Error('Modul Firebase belum termuat.');
+                    token = await window.fbUpdateSurat(tokenAktif, nomor, data);
+                } else {
+                    if (!window.fbSaveSurat) throw new Error('Modul Firebase belum termuat.');
+                    token = await window.fbSaveSurat(nomor, data);
+                }
+                tokenAktif = token;
+                nomorTerakhirDiterbitkan = nomor;
+                adaPerubahanBelumDisimpan = false;
+                perbaruiStatusTerbit(true);
+
                 const domain = document.getElementById('in-domain-verifikasi').value.trim().replace(/\/$/, '');
                 const verifyUrl = domain + '?id=' + encodeURIComponent(token);
                 regenerateQRCode(verifyUrl);
@@ -1108,7 +1493,7 @@
         async function promptResetNomor() {
             const lanjut = confirm('Reset nomor surat BULAN INI ke 000 (surat berikutnya akan jadi 001 lagi)?\n\nCatatan: surat yang SUDAH terbit tidak akan terhapus, tapi nomor baru bisa bentrok/sama dengan nomor yang sudah pernah dipakai bulan ini.');
             if (!lanjut) return;
-            const password = prompt('Untuk keamanan, masukkan ulang PASSWORD login Anda:');
+            const password = await mintaPasswordModal('Untuk keamanan, masukkan ulang password login Anda sebelum mereset nomor surat bulan ini.');
             if (!password) return;
             try {
                 if (!window.fbResetNomorBulanIni) throw new Error('Modul Firebase belum termuat.');
