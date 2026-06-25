@@ -12,15 +12,11 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
     <!-- SheetJS -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-    <!-- Tesseract.js (OCR untuk scan KTP) -->
-    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.0.4/dist/tesseract.min.js"></script>
-    <!-- Fuse.js (Fuzzy matching label KTP) -->
-    <script src="https://cdn.jsdelivr.net/npm/fuse.js@7.0.0/dist/fuse.min.js"></script>
     <!-- Firebase (Auth + Firestore) untuk Login Admin & Verifikasi Online QR -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
         import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
-        import { getFirestore, doc, setDoc, runTransaction } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
+        import { getFirestore, doc, getDoc, setDoc, runTransaction } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
 
         // >>> GANTI bagian di bawah ini dengan Firebase Config dari project "mb surat" Anda <<<
         // Cara ambil: Firebase Console > buka project > ikon gerigi (Project Settings)
@@ -88,6 +84,17 @@
             const token = buatTokenAcak();
             await setDoc(doc(db, "surat", token), { nomor, token, ...data, diterbitkanPada: new Date().toISOString() });
             return token;
+        };
+
+        // Tes koneksi nyata: berhasil baca dokumen di koleksi 'counters' artinya Auth + Firestore + Rules semuanya aktif
+        window.fbTestConnection = async () => {
+            if (!firebaseReady) return { ok: false, error: "Firebase Config belum diisi di kode HTML." };
+            try {
+                await getDoc(doc(db, "counters", "_cek_koneksi_"));
+                return { ok: true };
+            } catch (e) {
+                return { ok: false, error: e.message };
+            }
         };
     </script>
     <style>
@@ -280,6 +287,7 @@
                         <label class="text-gray-600 block mb-0.5 font-medium">Upload Logo Perusahaan (Ganti Kotak Default)</label>
                         <input type="file" id="in-logo-file" accept="image/*" class="w-full p-1 border border-gray-300 rounded bg-white" onchange="handleLogoUpload(this)">
                     </div>
+                    <button onclick="simpanPanel('kop')" class="w-full bg-amber-600 hover:bg-amber-700 text-white py-1.5 rounded text-[11px] font-bold"><i class="fas fa-save"></i> Simpan sebagai Default</button>
                 </div>
 
                 <!-- Informasi Utama -->
@@ -299,6 +307,7 @@
                         <label class="text-gray-500 block mb-0.5">Tujuan Surat (Kepada Yth,)</label>
                         <textarea id="in-tujuan" rows="3" class="w-full p-1.5 border border-gray-300 rounded leading-tight" oninput="renderLive()">Kepada Yth,&#10;PT Mandiri Utama Finance / Bpk SAKYAN&#10;Jl manek Roo 8c & 8d Kuta Padang, Kec. Johan Pahlawan&#10;Meulaboh Aceh Barat</textarea>
                     </div>
+                    <button onclick="simpanPanel('info')" class="w-full bg-gray-600 hover:bg-gray-700 text-white py-1.5 rounded text-[11px] font-bold"><i class="fas fa-save"></i> Simpan sebagai Default</button>
                 </div>
 
                 <!-- NOMOR SURAT & VERIFIKASI ONLINE (FITUR BARU) -->
@@ -313,10 +322,15 @@
                     </div>
                     <div>
                         <label class="text-gray-600 block mb-0.5 font-medium">Domain Verifikasi (isi setelah deploy verify.html)</label>
-                        <input type="text" id="in-domain-verifikasi" value="https://mb-surat.web.app/verify.html" class="w-full p-1.5 border border-gray-300 rounded text-[10.5px]" oninput="renderLive()">
+                        <input type="text" id="in-domain-verifikasi" value="https://mb-office.github.io/surat/verify.html" class="w-full p-1.5 border border-gray-300 rounded text-[10.5px]" oninput="renderLive()">
+                    </div>
+                    <div class="flex gap-1">
+                        <button onclick="simpanPanel('nomor')" class="flex-1 bg-gray-600 hover:bg-gray-700 text-white py-1.5 rounded text-[11px] font-bold"><i class="fas fa-save"></i> Simpan Domain</button>
+                        <button onclick="testBukaDomain()" class="flex-1 bg-gray-400 hover:bg-gray-500 text-white py-1.5 rounded text-[11px] font-bold"><i class="fas fa-external-link-alt"></i> Test Buka</button>
                     </div>
                     <button onclick="simpanDanTerbitkan()" class="w-full bg-emerald-700 hover:bg-emerald-800 text-white py-1.5 rounded text-[11px] font-bold"><i class="fas fa-cloud-upload-alt"></i> Simpan & Terbitkan (Update QR)</button>
                     <p id="status-publish" class="text-[10px] text-gray-500"></p>
+                    <p id="status-koneksi" class="text-[10px] text-gray-400"></p>
                 </div>
 
                 <!-- BLOK DATA A (ASAL) -->
@@ -326,28 +340,14 @@
                         <button onclick="addBaris('fields-a')" class="bg-blue-600 text-white px-2 py-0.5 rounded text-[10px] font-medium"><i class="fas fa-plus"></i> Tambah</button>
                     </div>
                     <div id="fields-a" class="space-y-1"></div>
+                    <button onclick="simpanBlok('fields-a','a')" class="w-full bg-gray-600 hover:bg-gray-700 text-white py-1.5 rounded text-[11px] font-bold"><i class="fas fa-save"></i> Simpan sebagai Default</button>
                 </div>
 
                 <!-- KALIMAT PENGHUBUNG -->
                 <div class="bg-white p-3 rounded-lg border border-gray-200 shadow-sm text-xs">
                     <label class="block font-bold text-gray-700 uppercase text-[11px] mb-1">Kalimat Penghubung Tengah</label>
                     <input type="text" id="in-transisi" value="Data Kendaraaan diatas, akan di MUTASI kan ke nama dibawah ini:" class="w-full p-1.5 border border-gray-300 rounded" oninput="renderLive()">
-                </div>
-
-                <!-- SCAN KTP OTOMATIS - OCR (FITUR BARU) -->
-                <div class="bg-sky-50/80 p-3 rounded-lg border border-sky-200 shadow-sm space-y-2 text-xs">
-                    <span class="font-bold text-sky-800 block uppercase tracking-wider text-[11px]"><i class="fas fa-id-card"></i> Scan KTP Otomatis (OCR)</span>
-                    <div>
-                        <label class="text-gray-600 block mb-0.5 font-medium">Foto KTP (boleh langsung foto dari kamera)</label>
-                        <input type="file" id="in-ktp-foto" accept="image/*" capture="environment" class="w-full p-1 border border-gray-300 rounded bg-white">
-                    </div>
-                    <button onclick="scanKTP()" class="w-full bg-sky-600 hover:bg-sky-700 text-white py-1.5 rounded text-[11px] font-bold"><i class="fas fa-magic"></i> Scan & Isi Otomatis ke Blok Data Bawah</button>
-                    <p id="status-ocr" class="text-[10px] text-gray-500"></p>
-                    <details class="text-[10px] text-gray-400">
-                        <summary class="cursor-pointer">Lihat teks mentah hasil OCR (untuk koreksi manual)</summary>
-                        <textarea id="ocr-raw-text" rows="5" class="w-full mt-1 p-1.5 border border-gray-200 rounded text-[10px] font-mono" readonly></textarea>
-                    </details>
-                    <p class="text-[10px] text-gray-400 italic">Hasil OCR otomatis terisi ke "Blok Data Bawah" di bawah — boleh dikoreksi manual kalau ada salah baca, atau isi semua field secara manual tanpa OCR sama sekali.</p>
+                    <button onclick="simpanPanel('transisi')" class="w-full mt-2 bg-gray-600 hover:bg-gray-700 text-white py-1.5 rounded text-[11px] font-bold"><i class="fas fa-save"></i> Simpan sebagai Default</button>
                 </div>
 
                 <!-- BLOK DATA B (TUJUAN) -->
@@ -357,6 +357,7 @@
                         <button onclick="addBaris('fields-b')" class="bg-blue-600 text-white px-2 py-0.5 rounded text-[10px] font-medium"><i class="fas fa-plus"></i> Tambah</button>
                     </div>
                     <div id="fields-b" class="space-y-1"></div>
+                    <button onclick="simpanBlok('fields-b','b')" class="w-full bg-gray-600 hover:bg-gray-700 text-white py-1.5 rounded text-[11px] font-bold"><i class="fas fa-save"></i> Simpan sebagai Default</button>
                 </div>
 
                 <!-- ESTIMASI BIAYA -->
@@ -366,6 +367,7 @@
                         <input type="text" id="in-biaya-angka" value="Rp. 13.183.500,-" class="p-1.5 border border-gray-300 rounded font-bold" oninput="renderLive()">
                         <input type="text" id="in-biaya-huruf" value="Tiga belas juta seratus delapan puluh tiga ribu lima ratus rupiah" class="p-1.5 border border-gray-300 rounded italic" oninput="renderLive()">
                     </div>
+                    <button onclick="simpanPanel('biaya')" class="w-full bg-gray-600 hover:bg-gray-700 text-white py-1.5 rounded text-[11px] font-bold"><i class="fas fa-save"></i> Simpan sebagai Default</button>
                 </div>
 
                 <!-- EDIT FOOTER MANUALLY (FITUR BARU) -->
@@ -399,6 +401,7 @@
                             <input type="text" id="in-footer-email2" value="Office.majubersama@gmail.com" class="w-full p-1.5 border border-gray-300 rounded text-[11px]" oninput="renderLive()">
                         </div>
                     </div>
+                    <button onclick="simpanPanel('footer')" class="w-full bg-blue-700 hover:bg-blue-800 text-white py-1.5 rounded text-[11px] font-bold"><i class="fas fa-save"></i> Simpan sebagai Default</button>
                 </div>
 
                 <!-- TOMBOL CETAK & EXCEL -->
@@ -540,9 +543,11 @@
         ];
 
         window.addEventListener('DOMContentLoaded', () => {
-            buildFormRows('fields-a', initDataA);
-            buildFormRows('fields-b', initDataB);
+            buildFormRows('fields-a', muatBlokDefault('a') || initDataA);
+            buildFormRows('fields-b', muatBlokDefault('b') || initDataB);
             renderTemplateList();
+            muatSemuaPanelDefault();
+            renderLive();
 
             regenerateQRCode("Surat belum diterbitkan secara online - klik 'Simpan & Terbitkan' setelah login & Firebase terhubung.");
 
@@ -551,6 +556,7 @@
                 window.fbOnAuthChange((user) => {
                     if (user) {
                         showApp();
+                        cekKoneksiFirebase();
                     } else if (!window.isOfflineMode) {
                         showLogin();
                     }
@@ -589,16 +595,26 @@
             }
         }
 
-        // Handler untuk Upload Logo Baru
+        // Handler untuk Upload Logo Baru (tersimpan otomatis ke localStorage agar tidak hilang saat dibuka ulang)
+        function setLogo(dataUrl) {
+            document.getElementById('default-logo').classList.add('hidden');
+            const customLogo = document.getElementById('custom-logo');
+            customLogo.src = dataUrl;
+            customLogo.classList.remove('hidden');
+        }
+
         function handleLogoUpload(input) {
             const file = input.files[0];
             if (file) {
                 const reader = new FileReader();
                 reader.onload = function(e) {
-                    document.getElementById('default-logo').classList.add('hidden');
-                    const customLogo = document.getElementById('custom-logo');
-                    customLogo.src = e.target.result;
-                    customLogo.classList.remove('hidden');
+                    setLogo(e.target.result);
+                    try {
+                        localStorage.setItem('mb_logo_dataurl', e.target.result);
+                    } catch (err) {
+                        console.error('Gagal menyimpan logo (file mungkin terlalu besar):', err);
+                        alert('Logo tampil tapi gagal disimpan permanen (ukuran file terlalu besar). Coba pakai gambar yang lebih kecil/dikompres.');
+                    }
                 }
                 reader.readAsDataURL(file);
             }
@@ -845,6 +861,28 @@
             showLogin();
         }
 
+        // Cek koneksi NYATA ke server (bukan cuma asumsi): coba baca 1 dokumen yang butuh login.
+        // Kalau berhasil tanpa error = Auth + Firestore + Rules semuanya benar-benar tersambung.
+        async function cekKoneksiFirebase() {
+            const statusEl = document.getElementById('status-koneksi');
+            if (!statusEl) return;
+            statusEl.textContent = 'Memeriksa koneksi server...';
+            statusEl.className = 'text-[10px] text-gray-400';
+            if (!window.fbTestConnection) {
+                statusEl.textContent = '❌ Modul Firebase tidak termuat (cek internet).';
+                statusEl.className = 'text-[10px] text-red-600 font-medium';
+                return;
+            }
+            const hasil = await window.fbTestConnection();
+            if (hasil.ok) {
+                statusEl.textContent = '✅ Server terhubung (Login, Database & Rules aktif).';
+                statusEl.className = 'text-[10px] text-green-600 font-medium';
+            } else {
+                statusEl.textContent = '❌ Belum terhubung: ' + hasil.error;
+                statusEl.className = 'text-[10px] text-red-600 font-medium';
+            }
+        }
+
         // ====== NOMOR SURAT OTOMATIS & TERBITKAN KE FIREBASE (VERIFIKASI QR) ======
         async function generateNomorOtomatis() {
             try {
@@ -877,7 +915,7 @@
                 const domain = document.getElementById('in-domain-verifikasi').value.trim().replace(/\/$/, '');
                 const verifyUrl = domain + '?id=' + encodeURIComponent(token);
                 regenerateQRCode(verifyUrl);
-                statusEl.textContent = '✅ Tersimpan & diterbitkan. QR sekarang mengarah ke: ' + verifyUrl;
+                statusEl.innerHTML = '✅ Tersimpan & diterbitkan. Tes link: <a href="' + verifyUrl + '" target="_blank" class="text-blue-600 underline break-all">' + verifyUrl + '</a>';
             } catch (e) {
                 console.error(e);
                 statusEl.textContent = '';
@@ -886,136 +924,82 @@
         }
         // ====== AKHIR LOGIN & VERIFIKASI ONLINE ======
 
-        // ====== SCAN KTP OTOMATIS: OCR (Tesseract.js) + FUZZY MATCHING LABEL (Fuse.js) ======
-        const KTP_LABELS = [
-            'NIK', 'Nama', 'Tempat/Tgl Lahir', 'Jenis Kelamin', 'Gol Darah', 'Alamat',
-            'RT/RW', 'Kel/Desa', 'Kecamatan', 'Agama', 'Status Perkawinan', 'Pekerjaan',
-            'Kewarganegaraan', 'Berlaku Hingga'
-        ];
-
-        // Pemetaan label hasil OCR KTP -> label baris yang sudah ada di "Blok Data Bawah"
-        const PEMETAAN_KTP_KE_FORM = {
-            'NIK': 'NIK',
-            'Nama': 'NAMA',
-            'Tempat/Tgl Lahir': 'TEMPAT/TGL. LAHIR',
-            'Alamat': 'ALAMAT',
-            'Pekerjaan': 'PEKERJAAN'
+        // ====== SIMPAN PENGATURAN PER-PANEL (localStorage, otomatis terisi lagi tiap buka aplikasi) ======
+        const PANEL_FIELDS = {
+            kop: ['in-nama-perusahaan'],
+            info: ['in-tgl', 'in-perihal', 'in-tujuan'],
+            nomor: ['in-domain-verifikasi'],
+            transisi: ['in-transisi'],
+            biaya: ['in-biaya-angka', 'in-biaya-huruf'],
+            footer: ['in-footer-alamat1', 'in-footer-alamat2', 'in-footer-telp', 'in-footer-email1', 'in-footer-email2', 'in-ttd-nama']
         };
 
-        function parseKTPText(text) {
-            const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
-            const fuse = new Fuse(KTP_LABELS, { includeScore: true, threshold: 0.4 });
-            const hasil = {};
-
-            // NIK: cari deretan digit (atau huruf yang mirip digit hasil salah baca OCR) terpanjang, dekat 16 digit
-            const kandidatDigit = text.match(/[0-9OIlB]{10,20}/g) || [];
-            if (kandidatDigit.length) {
-                const dibersihkan = kandidatDigit
-                    .map(s => s.replace(/O/g, '0').replace(/[Il]/g, '1').replace(/B/g, '8'))
-                    .sort((a, b) => Math.abs(a.length - 16) - Math.abs(b.length - 16));
-                if (dibersihkan[0]) hasil['NIK'] = dibersihkan[0].slice(0, 16);
-            }
-
-            let labelMenunggu = null;
-            lines.forEach((line) => {
-                const bagian = line.split(/[:;]/);
-                const calonLabel = bagian[0].trim();
-                let labelCocok = null;
-                let sisaBaris = '';
-
-                if (calonLabel.length <= 25) {
-                    const match = fuse.search(calonLabel)[0];
-                    if (match && match.score < 0.4) {
-                        labelCocok = match.item;
-                        sisaBaris = bagian.slice(1).join(':').trim();
-                    }
-                }
-
-                if (labelCocok) {
-                    if (sisaBaris) {
-                        hasil[labelCocok] = sisaBaris;
-                        labelMenunggu = null;
-                    } else {
-                        labelMenunggu = labelCocok; // nilainya mungkin ada di baris berikutnya (layout KTP 2 kolom)
-                    }
-                } else if (labelMenunggu) {
-                    hasil[labelMenunggu] = line;
-                    labelMenunggu = null;
-                }
+        function simpanPanel(key) {
+            const fields = PANEL_FIELDS[key];
+            if (!fields) return;
+            const data = {};
+            fields.forEach(id => {
+                const el = document.getElementById(id);
+                if (el) data[id] = el.value;
             });
-
-            return hasil;
-        }
-
-        function terapkanHasilOCR(hasil) {
-            const rows = Array.from(document.getElementById('fields-b').querySelectorAll('.dynamic-row'));
-            const fuseRow = new Fuse(rows.map(r => r.querySelector('.f-lbl').value), { includeScore: true, threshold: 0.4 });
-            let jumlahTerisi = 0;
-
-            Object.keys(PEMETAAN_KTP_KE_FORM).forEach((labelOcr) => {
-                const nilai = hasil[labelOcr];
-                if (!nilai) return;
-                const targetLabel = PEMETAAN_KTP_KE_FORM[labelOcr];
-
-                let baris = rows.find(r => r.querySelector('.f-lbl').value.toUpperCase() === targetLabel);
-                if (!baris) {
-                    const cocok = fuseRow.search(targetLabel)[0];
-                    if (cocok) baris = rows.find(r => r.querySelector('.f-lbl').value === cocok.item);
-                }
-                if (baris) {
-                    baris.querySelector('.f-val').value = nilai.replace(/\s{2,}/g, ' ').trim();
-                    jumlahTerisi++;
-                }
-            });
-
-            renderLive();
-            return jumlahTerisi;
-        }
-
-        async function scanKTP() {
-            const fileInput = document.getElementById('in-ktp-foto');
-            const statusEl = document.getElementById('status-ocr');
-            const rawEl = document.getElementById('ocr-raw-text');
-
-            if (!fileInput.files || !fileInput.files[0]) {
-                alert('Pilih atau foto KTP dulu sebelum klik Scan.');
-                return;
-            }
-            if (typeof Tesseract === 'undefined' || typeof Fuse === 'undefined') {
-                alert('Modul OCR belum termuat (cek koneksi internet Anda), atau isi datanya secara manual saja.');
-                return;
-            }
-
-            statusEl.textContent = 'Memindai KTP... 0%';
-            rawEl.value = '';
-
             try {
-                const { data } = await Tesseract.recognize(fileInput.files[0], 'ind+eng', {
-                    logger: (m) => {
-                        if (m.status === 'recognizing text') {
-                            statusEl.textContent = 'Memindai KTP... ' + Math.round(m.progress * 100) + '%';
-                        } else if (m.status) {
-                            statusEl.textContent = m.status + '...';
-                        }
-                    }
-                });
-
-                const text = data.text || '';
-                rawEl.value = text;
-
-                const hasil = parseKTPText(text);
-                const jumlah = terapkanHasilOCR(hasil);
-
-                statusEl.textContent = jumlah > 0
-                    ? `Selesai. ${jumlah} field terisi otomatis di "Blok Data Bawah" — cek & koreksi manual kalau ada salah baca.`
-                    : 'OCR selesai tapi tidak ada field yang berhasil dikenali otomatis. Cek teks mentah di bawah, lalu isi manual.';
+                localStorage.setItem('panel_default_' + key, JSON.stringify(data));
+                alert('Tersimpan. Pengaturan ini akan otomatis terisi lagi tiap kali aplikasi dibuka.');
             } catch (e) {
                 console.error(e);
-                statusEl.textContent = '';
-                alert('Gagal memindai KTP: ' + e.message + '\n\nCoba foto ulang dengan pencahayaan lebih baik, atau isi manual saja.');
+                alert('Gagal menyimpan: ' + e.message);
             }
         }
-        // ====== AKHIR SCAN KTP OTOMATIS ======
+
+        function muatSemuaPanelDefault() {
+            Object.keys(PANEL_FIELDS).forEach(key => {
+                try {
+                    const raw = localStorage.getItem('panel_default_' + key);
+                    if (!raw) return;
+                    const data = JSON.parse(raw);
+                    Object.keys(data).forEach(id => {
+                        const el = document.getElementById(id);
+                        if (el) el.value = data[id];
+                    });
+                } catch (e) { console.error('Gagal memuat panel ' + key, e); }
+            });
+
+            try {
+                const logoSimpanan = localStorage.getItem('mb_logo_dataurl');
+                if (logoSimpanan) setLogo(logoSimpanan);
+            } catch (e) { console.error(e); }
+        }
+
+        function simpanBlok(containerId, key) {
+            const rows = Array.from(document.getElementById(containerId).querySelectorAll('.dynamic-row')).map(r => ({
+                label: r.querySelector('.f-lbl').value,
+                value: r.querySelector('.f-val').value
+            }));
+            try {
+                localStorage.setItem('blok_default_' + key, JSON.stringify(rows));
+                alert('Tersimpan sebagai default. Daftar field ini akan otomatis muncul tiap kali aplikasi dibuka.');
+            } catch (e) {
+                console.error(e);
+                alert('Gagal menyimpan: ' + e.message);
+            }
+        }
+
+        function muatBlokDefault(key) {
+            try {
+                const raw = localStorage.getItem('blok_default_' + key);
+                return raw ? JSON.parse(raw) : null;
+            } catch (e) {
+                console.error(e);
+                return null;
+            }
+        }
+
+        function testBukaDomain() {
+            const domain = document.getElementById('in-domain-verifikasi').value.trim();
+            if (!domain) { alert('Isi Domain Verifikasi dulu.'); return; }
+            window.open(domain, '_blank');
+        }
+        // ====== AKHIR SIMPAN PER-PANEL ======
 
         function exportExcel() {
             const rowsA = Array.from(document.getElementById('fields-a').querySelectorAll('.dynamic-row')).map(r => [r.querySelector('.f-lbl').value, r.querySelector('.f-val').value]);
