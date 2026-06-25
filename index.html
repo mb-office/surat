@@ -842,8 +842,8 @@
                                         <div class="mt-6 mb-4 avoid-break-print">
                                             <div class="flex justify-between items-end pb-2">
                                                 <!-- QR Code Validasi -->
-                                                <div class="flex items-center gap-2 border border-gray-300 p-1 rounded bg-gray-50/40 w-[210px] shadow-sm">
-                                                    <div id="qrcode" class="bg-white p-0.5 shrink-0"></div>
+                                                <div class="flex items-center gap-2 border border-gray-300 p-1.5 rounded bg-gray-50/40 w-[260px] shadow-sm">
+                                                    <div id="qrcode" class="bg-white p-0.5 shrink-0 flex items-center justify-center"></div>
                                                     <div class="text-[13px] text-gray-500 leading-tight">
                                                         <span class="text-green-700 font-bold block"><i class="fas fa-check-circle"></i> DOKUMEN VALID</span>
                                                         Scan otomatis untuk verifikasi sistem online perusahaan.
@@ -1540,7 +1540,10 @@
         function regenerateQRCode(text) {
             const el = document.getElementById('qrcode');
             el.innerHTML = '';
-            qrInstance = new QRCode(el, { text: text, width: 50, height: 50 });
+            // Resolusi dibesarkan (50px terlalu kecil & modulnya jadi terlalu rapat untuk dipindai
+            // setelah dikompres ke PDF) + correctLevel diturunkan ke M supaya jumlah modul lebih
+            // longgar untuk panjang URL yang sama, sehingga lebih mudah dipindai kamera HP.
+            qrInstance = new QRCode(el, { text: text, width: 130, height: 130, correctLevel: QRCode.CorrectLevel.M });
         }
 
         // Lacak surat yang sedang aktif diedit (token + nomor) supaya re-publish meng-UPDATE, bukan bikin dokumen baru
