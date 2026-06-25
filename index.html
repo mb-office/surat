@@ -96,6 +96,18 @@
                 return { ok: false, error: e.message };
             }
         };
+
+        // Reset nomor urut bulan ini ke 0 - WAJIB verifikasi ulang password demi keamanan
+        window.fbResetNomorBulanIni = async (password) => {
+            if (!firebaseReady) throw new Error("Firebase belum terhubung.");
+            const user = auth.currentUser;
+            if (!user || !user.email) throw new Error("Anda belum login.");
+            await signInWithEmailAndPassword(auth, user.email, password); // verifikasi ulang password
+            const now = new Date();
+            const counterRef = doc(db, "counters", `MB-${now.getFullYear()}-${now.getMonth() + 1}`);
+            await setDoc(counterRef, { lastNumber: 0 });
+            return true;
+        };
     </script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
@@ -329,6 +341,7 @@
                         <button onclick="testBukaDomain()" class="flex-1 bg-gray-400 hover:bg-gray-500 text-white py-1.5 rounded text-[11px] font-bold"><i class="fas fa-external-link-alt"></i> Test Buka</button>
                     </div>
                     <button onclick="simpanDanTerbitkan()" class="w-full bg-emerald-700 hover:bg-emerald-800 text-white py-1.5 rounded text-[11px] font-bold"><i class="fas fa-cloud-upload-alt"></i> Simpan & Terbitkan (Update QR)</button>
+                    <button onclick="promptResetNomor()" class="w-full bg-red-50 border border-red-300 text-red-600 hover:bg-red-100 py-1.5 rounded text-[11px] font-bold"><i class="fas fa-undo"></i> Reset Nomor Surat (Bulan Ini)</button>
                     <p id="status-publish" class="text-[10px] text-gray-500"></p>
                     <p id="status-koneksi" class="text-[10px] text-gray-400"></p>
                 </div>
@@ -364,8 +377,12 @@
                 <div class="bg-white p-3 rounded-lg border border-gray-200 shadow-sm space-y-2 text-xs">
                     <span class="font-bold text-gray-700 uppercase text-[11px]">Estimasi Total Biaya</span>
                     <div class="grid grid-cols-1 gap-1.5">
-                        <input type="text" id="in-biaya-angka" value="Rp. 13.183.500,-" class="p-1.5 border border-gray-300 rounded font-bold" oninput="renderLive()">
-                        <input type="text" id="in-biaya-huruf" value="Tiga belas juta seratus delapan puluh tiga ribu lima ratus rupiah" class="p-1.5 border border-gray-300 rounded italic" oninput="renderLive()">
+                        <input type="text" id="in-biaya-angka" value="Rp. 13.183.500,-" class="p-1.5 border border-gray-300 rounded font-bold" oninput="updateBiayaHurufOtomatis()">
+                        <div class="flex gap-1">
+                            <input type="text" id="in-biaya-huruf" value="Tiga belas juta seratus delapan puluh tiga ribu lima ratus rupiah" class="flex-1 p-1.5 border border-gray-300 rounded italic" oninput="renderLive()">
+                            <button onclick="updateBiayaHurufOtomatis()" class="bg-gray-500 hover:bg-gray-600 text-white px-2 rounded text-[10px]" title="Buat ulang otomatis dari angka"><i class="fas fa-sync"></i></button>
+                        </div>
+                        <p class="text-[10px] text-gray-400 italic">Terbilang otomatis terisi dari angka di atas — boleh diedit manual kalau mau redaksi lain.</p>
                     </div>
                     <button onclick="simpanPanel('biaya')" class="w-full bg-gray-600 hover:bg-gray-700 text-white py-1.5 rounded text-[11px] font-bold"><i class="fas fa-save"></i> Simpan sebagai Default</button>
                 </div>
@@ -922,7 +939,69 @@
                 alert('Gagal menyimpan ke Firebase: ' + e.message + '\n\nCek lagi: 1) Firebase Config sudah diisi benar, 2) Anda sudah login (bukan mode offline), 3) Firestore aktif & rules mengizinkan tulis untuk admin.');
             }
         }
-        // ====== AKHIR LOGIN & VERIFIKASI ONLINE ======
+        async function promptResetNomor() {
+            const lanjut = confirm('Reset nomor surat BULAN INI ke 000 (surat berikutnya akan jadi 001 lagi)?\n\nCatatan: surat yang SUDAH terbit tidak akan terhapus, tapi nomor baru bisa bentrok/sama dengan nomor yang sudah pernah dipakai bulan ini.');
+            if (!lanjut) return;
+            const password = prompt('Untuk keamanan, masukkan ulang PASSWORD login Anda:');
+            if (!password) return;
+            try {
+                if (!window.fbResetNomorBulanIni) throw new Error('Modul Firebase belum termuat.');
+                await window.fbResetNomorBulanIni(password);
+                alert('Berhasil. Nomor surat bulan ini sudah di-reset, surat selanjutnya akan mulai dari 001.');
+            } catch (e) {
+                console.error(e);
+                alert('Gagal reset: ' + (e.message || 'Password salah atau koneksi gagal.'));
+            }
+        }
+        // ====== KONVERSI ANGKA KE TERBILANG (Bahasa Indonesia) - OTOMATIS ======
+        function terbilang(n) {
+            n = Math.floor(Math.abs(n));
+            if (n === 0) return 'nol';
+            const satuan = ['', 'satu', 'dua', 'tiga', 'empat', 'lima', 'enam', 'tujuh', 'delapan', 'sembilan'];
+
+            function kata(n) {
+                if (n < 10) return satuan[n];
+                if (n < 20) return n === 10 ? 'sepuluh' : (n === 11 ? 'sebelas' : satuan[n - 10] + ' belas');
+                if (n < 100) {
+                    const puluh = Math.floor(n / 10), sisa = n % 10;
+                    return satuan[puluh] + ' puluh' + (sisa ? ' ' + kata(sisa) : '');
+                }
+                if (n < 1000) {
+                    const ratus = Math.floor(n / 100), sisa = n % 100;
+                    return (ratus === 1 ? 'seratus' : satuan[ratus] + ' ratus') + (sisa ? ' ' + kata(sisa) : '');
+                }
+                if (n < 1000000) {
+                    const ribu = Math.floor(n / 1000), sisa = n % 1000;
+                    return (ribu === 1 ? 'seribu' : kata(ribu) + ' ribu') + (sisa ? ' ' + kata(sisa) : '');
+                }
+                if (n < 1000000000) {
+                    const juta = Math.floor(n / 1000000), sisa = n % 1000000;
+                    return kata(juta) + ' juta' + (sisa ? ' ' + kata(sisa) : '');
+                }
+                if (n < 1000000000000) {
+                    const miliar = Math.floor(n / 1000000000), sisa = n % 1000000000;
+                    return kata(miliar) + ' miliar' + (sisa ? ' ' + kata(sisa) : '');
+                }
+                const triliun = Math.floor(n / 1000000000000), sisa = n % 1000000000000;
+                return kata(triliun) + ' triliun' + (sisa ? ' ' + kata(sisa) : '');
+            }
+
+            return kata(n).replace(/\s+/g, ' ').trim();
+        }
+
+        function updateBiayaHurufOtomatis() {
+            const angkaStr = document.getElementById('in-biaya-angka').value;
+            const digitOnly = angkaStr.replace(/[^0-9]/g, '');
+            if (digitOnly) {
+                const angka = parseInt(digitOnly, 10);
+                if (!isNaN(angka)) {
+                    const teks = terbilang(angka);
+                    document.getElementById('in-biaya-huruf').value = teks.charAt(0).toUpperCase() + teks.slice(1) + ' rupiah';
+                }
+            }
+            renderLive();
+        }
+        // ====== AKHIR TERBILANG ======
 
         // ====== SIMPAN PENGATURAN PER-PANEL (localStorage, otomatis terisi lagi tiap buka aplikasi) ======
         const PANEL_FIELDS = {
