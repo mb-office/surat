@@ -146,6 +146,17 @@
             const snap = await getDocs(query(collection(db, "surat"), orderBy("diterbitkanPada", "desc"), limit(jumlah)));
             return snap.docs.map(d => ({ id: d.id, ...d.data() }));
         };
+
+        // Hapus SEMUA riwayat surat di server - WAJIB verifikasi ulang password demi keamanan
+        window.fbResetRiwayatSurat = async (password) => {
+            if (!firebaseReady) throw new Error("Firebase belum terhubung.");
+            const user = auth.currentUser;
+            if (!user || !user.email) throw new Error("Anda belum login.");
+            await signInWithEmailAndPassword(auth, user.email, password); // verifikasi ulang password
+            const snap = await getDocs(collection(db, "surat"));
+            await Promise.all(snap.docs.map(d => deleteDoc(doc(db, "surat", d.id))));
+            return snap.docs.length;
+        };
     </script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
@@ -500,6 +511,7 @@
                             <button onclick="renderRiwayatSurat()" class="text-[10px] text-sky-700 font-medium"><i class="fas fa-sync"></i> Refresh</button>
                         </div>
                         <div id="daftar-riwayat-surat" class="space-y-1"></div>
+                        <button onclick="promptResetRiwayat()" class="w-full bg-red-50 border border-red-300 text-red-600 hover:bg-red-100 py-1.5 rounded text-[11px] font-bold"><i class="fas fa-trash"></i> Reset Riwayat Surat (Hapus Semua)</button>
                     </div>
                 </details>
 
@@ -637,6 +649,9 @@
             { label: "PEKERJAAN", value: "PETANI/PEKEBUN" }
         ];
 
+        let sudahPernahLogin = false;
+        let logoutManual = false;
+
         window.addEventListener('DOMContentLoaded', () => {
             buildFormRows('fields-a', initDataA);
             buildFormRows('fields-b', initDataB);
@@ -648,6 +663,8 @@
             if (window.fbOnAuthChange) {
                 window.fbOnAuthChange((user) => {
                     if (user) {
+                        sudahPernahLogin = true;
+                        logoutManual = false;
                         showApp();
                         cekKoneksiFirebase();
                         // Semua data (pengaturan default, logo, template, riwayat surat) ditarik dari Firestore setelah login berhasil
@@ -655,7 +672,19 @@
                         renderTemplateList();
                         renderRiwayatSurat();
                     } else if (!window.isOfflineMode) {
-                        showLogin();
+                        // PENTING: hanya lempar ke layar login kalau ini logout MANUAL (klik "Keluar") atau memang
+                        // belum pernah login sama sekali di sesi ini. Kalau sudah pernah login lalu koneksi
+                        // sempat putus-nyambung, Firebase bisa sesaat melaporkan "belum login" - jangan
+                        // langsung paksa ke layar login karena itu cuma membuat tampilan keluar-masuk sendiri.
+                        if (logoutManual || !sudahPernahLogin) {
+                            showLogin();
+                        } else {
+                            const statusEl = document.getElementById('status-koneksi');
+                            if (statusEl) {
+                                statusEl.textContent = '⚠️ Koneksi sempat terputus, mencoba menyambung ulang...';
+                                statusEl.className = 'text-[10px] text-amber-600 font-medium';
+                            }
+                        }
                     }
                 });
             } else {
@@ -955,6 +984,21 @@
             isiFormDariData(entry);
             alert('Data surat nomor "' + (entry.nomor || '-') + '" sudah dimuat ke form — bisa dilihat ulang atau dicetak ulang.');
         }
+        async function promptResetRiwayat() {
+            const lanjut = confirm('HAPUS SEMUA riwayat surat yang tersimpan di server?\n\nPERINGATAN: Surat yang sudah dicetak & QR-nya sudah dibagikan TIDAK AKAN BISA diverifikasi lagi setelah ini (link verifikasi jadi "tidak ditemukan"). Nomor urut bulanan TIDAK ikut ter-reset (pakai tombol Reset Nomor terpisah kalau perlu).\n\nLanjutkan?');
+            if (!lanjut) return;
+            const password = prompt('Untuk keamanan, masukkan ulang PASSWORD login Anda:');
+            if (!password) return;
+            try {
+                if (!window.fbResetRiwayatSurat) throw new Error('Modul Firebase belum termuat.');
+                const jumlah = await window.fbResetRiwayatSurat(password);
+                alert('Berhasil. ' + jumlah + ' riwayat surat telah dihapus dari server.');
+                renderRiwayatSurat();
+            } catch (e) {
+                console.error(e);
+                alert('Gagal reset: ' + (e.message || 'Password salah atau koneksi gagal.'));
+            }
+        }
         // ====== AKHIR RIWAYAT SURAT ======
 
         // ====== LOGIN ADMIN (Firebase Auth) ======
@@ -994,6 +1038,7 @@
         }
 
         async function doLogout() {
+            logoutManual = true;
             try { await window.fbLogout(); } catch (e) {}
             window.isOfflineMode = false;
             showLogin();
