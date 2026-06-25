@@ -10,6 +10,8 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- QRCode.js -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <!-- jsPDF (untuk fitur Kirim via WhatsApp - membuat file PDF asli, bukan gambar/teks) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <!-- html2canvas (untuk fitur Kirim via WhatsApp - render surat jadi gambar) -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
     <!-- Firebase (Auth + Firestore) untuk Login Admin & Verifikasi Online QR -->
@@ -285,13 +287,13 @@
                 display: table-row-group !important;
             }
             #surat-kop-header {
-                padding: 12mm 18mm 4mm 18mm !important;
+                padding: 8mm 18mm 3mm 18mm !important;
             }
             #surat-footer-bottom {
-                padding: 4mm 18mm 12mm 18mm !important;
+                padding: 3mm 18mm 7mm 18mm !important;
             }
             #surat-body-content {
-                padding: 2mm 18mm 6mm 18mm !important;
+                padding: 1mm 18mm 3mm 18mm !important;
                 vertical-align: top !important;
             }
             /* Hindari baris tabel & blok TTD/QR terpotong di tengah pembagian halaman,
@@ -308,6 +310,67 @@
             #surat-footer-spacer {
                 height: 8mm;
                 display: block;
+            }
+
+            /* ===== PEMADATAN KHUSUS CETAK/PDF SUPAYA SURAT MUAT 1 HALAMAN =====
+               Hanya berlaku saat cetak/simpan PDF - tampilan di layar (preview) TIDAK berubah,
+               jadi logo & garis kop/footer yang sudah dibesarkan tetap terlihat besar di layar. */
+            #logo-wrapper {
+                width: 70px !important;
+                height: 70px !important;
+            }
+            #default-logo {
+                font-size: 28px !important;
+            }
+            #view-nama-perusahaan {
+                font-size: 28px !important;
+            }
+            #kop-divider-line {
+                height: 7px !important;
+                margin-bottom: 2px !important;
+            }
+            #kop-info-row {
+                margin-bottom: 3px !important;
+                font-size: 12px !important;
+            }
+            #footer-divider-line {
+                height: 8px !important;
+                margin-top: 3px !important;
+            }
+            #footer-text-block {
+                font-size: 10.5px !important;
+                line-height: 1.25 !important;
+                padding-top: 4px !important;
+            }
+            #footer-text-block > * + * {
+                margin-top: 2px !important;
+            }
+            .surat-font {
+                font-size: 11.5px !important;
+                line-height: 1.25 !important;
+            }
+            #surat-konten-utama > * + * {
+                margin-top: 7px !important;
+            }
+            #view-judul-surat {
+                margin-bottom: 5px !important;
+            }
+            #view-tujuan {
+                margin-bottom: 5px !important;
+            }
+            #tabel-blok-a, #tabel-blok-b {
+                margin: 3px 0 !important;
+            }
+            #tabel-blok-a td, #tabel-blok-b td {
+                padding-top: 1px !important;
+                padding-bottom: 1px !important;
+            }
+            .avoid-break-print {
+                margin-top: 8px !important;
+                margin-bottom: 4px !important;
+            }
+            #view-ttd-perusahaan {
+                margin-bottom: 22px !important;
             }
         }
 
@@ -682,10 +745,10 @@
                                             </div>
                                             
                                             <!-- Garis Pembatas Kop -->
-                                            <div class="h-[11px] w-full mb-1" style="background: linear-gradient(to right, #9CA3AF 0%, #9CA3AF 46%, #2190BC 46%, #2190BC 62%, #34507C 62%, #34507C 69%, #1E255E 69%, #1E255E 100%);"></div>
+                                            <div id="kop-divider-line" class="h-[11px] w-full mb-1" style="background: linear-gradient(to right, #9CA3AF 0%, #9CA3AF 46%, #2190BC 46%, #2190BC 62%, #34507C 62%, #34507C 69%, #1E255E 69%, #1E255E 100%);"></div>
 
                                             <!-- Nomor Surat & Tanggal Berkas (hanya di halaman pertama, di halaman lanjutan tetap muncul garis kop saja) -->
-                                            <div class="flex justify-between items-end surat-font font-normal mb-2 text-gray-900">
+                                            <div id="kop-info-row" class="flex justify-between items-end surat-font font-normal mb-2 text-gray-900">
                                                 <div>Nomor: <span id="view-nomor-surat" class="font-bold">-</span></div>
                                                 <div id="view-tgl">Banda Aceh, 24 Juni 2026</div>
                                             </div>
@@ -700,7 +763,7 @@
                                     <td>
                                         <div id="surat-footer-bottom" style="padding: 4mm 18mm 10mm 18mm;">
                                             <!-- INFORMASI ALAMAT FOOTER EDITABLE -->
-                                            <div class="border-t border-gray-300 pt-2 text-[13px] text-gray-800 font-sans space-y-1">
+                                            <div id="footer-text-block" class="border-t border-gray-300 pt-2 text-[13px] text-gray-800 font-sans space-y-1">
                                                 <div class="flex items-start gap-2">
                                                     <i class="fas fa-map-marker-alt text-gray-800 mt-0.5 w-3 text-center shrink-0"></i>
                                                     <div class="flex-1 grid grid-cols-2 gap-x-3">
@@ -719,7 +782,7 @@
                                                         <span id="view-footer-email2" class="text-blue-700 underline">...</span>
                                                     </div>
                                                 </div>
-                                                <div class="h-[14px] w-full mt-1.5" style="background: linear-gradient(to right, #2190BC 0%, #2190BC 38%, #1E255E 38%, #1E255E 100%);"></div>
+                                                <div id="footer-divider-line" class="h-[14px] w-full mt-1.5" style="background: linear-gradient(to right, #2190BC 0%, #2190BC 38%, #1E255E 38%, #1E255E 100%);"></div>
                                             </div>
                                         </div>
                                     </td>
@@ -731,7 +794,7 @@
                                 <tr>
                                     <td id="surat-body-content" style="padding: 2mm 18mm 6mm 18mm; vertical-align: top;">
                                         <!-- ISI UTAMA SURAT -->
-                                        <div class="surat-font space-y-4">
+                                        <div id="surat-konten-utama" class="surat-font space-y-4">
                                             <div id="view-judul-surat" class="text-center font-bold underline uppercase mb-3 tracking-wide">Surat Estimasi Biaya Mutasi</div>
                                             <div id="view-tujuan" class="whitespace-pre-line mb-3 tracking-wide">Kepada Yth,...</div>
                                             
@@ -741,7 +804,7 @@
                                             </div>
 
                                             <!-- TABEL UTAMA BLOK A -->
-                                            <table class="w-full text-[13px] my-2 border-none">
+                                            <table id="tabel-blok-a" class="w-full text-[13px] my-2 border-none">
                                                 <tbody id="view-table-a" class="leading-tight"></tbody>
                                             </table>
 
@@ -749,7 +812,7 @@
                                             <div id="view-transisi" class="my-2 font-normal text-gray-900">Data Kendaraaan diatas, akan di MUTASI kan ke nama dibawah ini:</div>
 
                                             <!-- TABEL UTAMA BLOK B -->
-                                            <table class="w-full text-[13px] my-2 border-none">
+                                            <table id="tabel-blok-b" class="w-full text-[13px] my-2 border-none">
                                                 <tbody id="view-table-b" class="leading-tight"></tbody>
                                             </table>
 
@@ -1635,7 +1698,49 @@
         }
         // ====== AKHIR SIMPAN PER-PANEL ======
 
-        // ====== KIRIM VIA WHATSAPP ======
+        // ====== KIRIM VIA WHATSAPP (mengirim FILE PDF ASLI, bukan teks/gambar) ======
+        async function buatPdfSurat() {
+            const printArea = document.getElementById('print-area');
+            const skalaSebelumnya = printArea.style.transform;
+            printArea.style.transform = 'scale(1)'; // render ulang di ukuran asli biar tajam
+            const canvas = await html2canvas(printArea, { scale: 2, useCORS: true, backgroundColor: '#ffffff' });
+            printArea.style.transform = skalaSebelumnya;
+
+            const { jsPDF } = window.jspdf;
+            const pdf = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
+            const pageWidth = 210, pageHeight = 297;
+            const imgWidth = pageWidth;
+            const imgHeight = (canvas.height * imgWidth) / canvas.width;
+            const imgData = canvas.toDataURL('image/jpeg', 0.95);
+
+            if (imgHeight <= pageHeight) {
+                // Muat dalam 1 halaman PDF
+                pdf.addImage(imgData, 'JPEG', 0, 0, imgWidth, imgHeight);
+            } else {
+                // Jaga-jaga kalau isi surat melebihi 1 halaman (mis. banyak baris tambahan) - pecah otomatis ke beberapa halaman PDF
+                let sisaTinggiPx = canvas.height;
+                let offsetPx = 0;
+                const pxPerMm = canvas.width / imgWidth;
+                const pageHeightPx = pageHeight * pxPerMm;
+                let halamanKe = 0;
+                while (sisaTinggiPx > 0) {
+                    if (halamanKe > 0) pdf.addPage();
+                    const tinggiPotonganPx = Math.min(pageHeightPx, sisaTinggiPx);
+                    const potongCanvas = document.createElement('canvas');
+                    potongCanvas.width = canvas.width;
+                    potongCanvas.height = tinggiPotonganPx;
+                    const ctx = potongCanvas.getContext('2d');
+                    ctx.drawImage(canvas, 0, offsetPx, canvas.width, tinggiPotonganPx, 0, 0, canvas.width, tinggiPotonganPx);
+                    const potongData = potongCanvas.toDataURL('image/jpeg', 0.95);
+                    pdf.addImage(potongData, 'JPEG', 0, 0, imgWidth, tinggiPotonganPx / pxPerMm);
+                    offsetPx += tinggiPotonganPx;
+                    sisaTinggiPx -= tinggiPotonganPx;
+                    halamanKe++;
+                }
+            }
+            return pdf;
+        }
+
         async function kirimViaWhatsApp() {
             const btn = document.getElementById('btn-whatsapp');
             const nomor = document.getElementById('in-nomor-surat').value.trim() || '-';
@@ -1643,35 +1748,46 @@
             const tujuan = document.getElementById('in-tujuan').value.trim();
             const domain = document.getElementById('in-domain-verifikasi').value.trim();
             const teks = `*${judul}*\nNomor: ${nomor}\n\n${tujuan}\n\n` + (tokenAktif ? `Verifikasi: ${domain}?id=${encodeURIComponent(tokenAktif)}` : '(Surat belum diterbitkan online)');
+            const namaFile = (nomor !== '-' ? nomor.replace(/\//g, '_') : 'surat') + '.pdf';
 
             const asalLabel = btn.innerHTML;
             btn.disabled = true;
-            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Menyiapkan...';
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Membuat PDF...';
 
             try {
-                if (window.html2canvas && navigator.canShare) {
-                    const printArea = document.getElementById('print-area');
-                    const skalaSebelumnya = printArea.style.transform;
-                    printArea.style.transform = 'scale(1)'; // render ulang di ukuran asli biar gambar tajam
-                    const canvas = await html2canvas(printArea, { scale: 2, useCORS: true, backgroundColor: '#ffffff' });
-                    printArea.style.transform = skalaSebelumnya;
+                if (!window.html2canvas) throw new Error('Modul html2canvas belum termuat.');
+                if (!window.jspdf) throw new Error('Modul jsPDF belum termuat.');
 
-                    const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
-                    const file = new File([blob], (nomor !== '-' ? nomor.replace(/\//g, '_') : 'surat') + '.png', { type: 'image/png' });
+                const pdf = await buatPdfSurat();
+                const blob = pdf.output('blob');
+                const file = new File([blob], namaFile, { type: 'application/pdf' });
 
-                    if (navigator.canShare({ files: [file] })) {
-                        await navigator.share({ files: [file], title: judul, text: teks });
-                        btn.innerHTML = asalLabel;
-                        btn.disabled = false;
-                        return;
-                    }
+                if (navigator.canShare && navigator.canShare({ files: [file] })) {
+                    // Buka share sheet HP - pilih WhatsApp dari daftar, file PDF asli langsung terlampir
+                    await navigator.share({ files: [file], title: judul, text: teks });
+                    btn.innerHTML = asalLabel;
+                    btn.disabled = false;
+                    return;
                 }
-            } catch (e) {
-                console.error('Gagal share gambar, pakai cara teks saja:', e);
-            }
 
-            // Fallback: buka WhatsApp dengan teks saja (gambar/PDF harus dilampirkan manual oleh pengguna)
-            window.open('https://wa.me/?text=' + encodeURIComponent(teks), '_blank');
+                // Fallback (browser/desktop tanpa Web Share API file): unduh PDF-nya dulu,
+                // lalu buka WhatsApp dengan teks - pengguna lampirkan PDF yang baru terunduh secara manual.
+                const urlUnduh = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = urlUnduh;
+                a.download = namaFile;
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                setTimeout(() => URL.revokeObjectURL(urlUnduh), 5000);
+
+                alert('PDF surat sudah terunduh ke perangkat Anda (' + namaFile + ').\nWhatsApp akan dibuka dengan teks pengantar - silakan lampirkan file PDF yang baru terunduh secara manual.');
+                window.open('https://wa.me/?text=' + encodeURIComponent(teks), '_blank');
+            } catch (e) {
+                console.error('Gagal membuat/mengirim PDF:', e);
+                alert('Gagal membuat PDF: ' + e.message + '\n\nMembuka WhatsApp dengan teks saja sebagai cadangan.');
+                window.open('https://wa.me/?text=' + encodeURIComponent(teks), '_blank');
+            }
             btn.innerHTML = asalLabel;
             btn.disabled = false;
         }
