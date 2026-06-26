@@ -712,6 +712,10 @@
                         <details class="bg-white rounded-lg border border-gray-200">
                             <summary class="cursor-pointer select-none px-3 py-2 font-bold text-gray-700 text-[13px] uppercase tracking-wider">Kalimat Penghubung Tengah</summary>
                             <div class="p-3 pt-0 text-xs">
+                                <label class="flex items-center gap-1.5 text-[12px] text-gray-500 cursor-pointer select-none mb-1.5">
+                                    <input type="checkbox" id="in-tampil-transisi" checked onchange="renderLive()" class="w-3.5 h-3.5 accent-emerald-600">
+                                    Tampilkan kalimat ini di surat
+                                </label>
                                 <input type="text" id="in-transisi" value="Data Kendaraaan diatas, akan di MUTASI kan ke nama dibawah ini:" class="w-full p-1.5 border border-gray-300 rounded" oninput="renderLive()">
                                 <button onclick="simpanPanel('transisi')" class="w-full mt-2 bg-gray-600 hover:bg-gray-700 text-white py-1.5 rounded text-[13px] font-bold"><i class="fas fa-save"></i> Simpan sebagai Default</button>
                             </div>
@@ -721,6 +725,10 @@
                         <details class="bg-white rounded-lg border border-gray-200">
                             <summary class="cursor-pointer select-none px-3 py-2 font-bold text-gray-700 text-[13px] uppercase tracking-wider">Blok Data Bawah (Tujuan)</summary>
                             <div class="p-3 pt-0 space-y-2 text-xs">
+                                <label class="flex items-center gap-1.5 text-[12px] text-gray-500 cursor-pointer select-none">
+                                    <input type="checkbox" id="in-tampil-tabel-b" checked onchange="renderLive()" class="w-3.5 h-3.5 accent-emerald-600">
+                                    Tampilkan tabel ini di surat
+                                </label>
                                 <div class="flex justify-end">
                                     <button onclick="addBaris('fields-b')" class="bg-blue-600 text-white px-2 py-0.5 rounded text-[12px] font-medium"><i class="fas fa-plus"></i> Tambah</button>
                                 </div>
@@ -740,6 +748,10 @@
                                         <button onclick="updateBiayaHurufOtomatis()" class="bg-gray-500 hover:bg-gray-600 text-white px-2 rounded text-[12px]" title="Buat ulang otomatis dari angka"><i class="fas fa-sync"></i></button>
                                     </div>
                                     <p class="text-[12px] text-gray-400 italic">Terbilang otomatis terisi dari angka di atas — boleh diedit manual kalau mau redaksi lain.</p>
+                                    <label class="flex items-center gap-1.5 text-[12px] text-gray-500 cursor-pointer select-none">
+                                        <input type="checkbox" id="in-tampil-terbilang" checked onchange="renderLive()" class="w-3.5 h-3.5 accent-emerald-600">
+                                        Tampilkan terbilang ( ... ) di surat
+                                    </label>
                                 </div>
                                 <button onclick="simpanPanel('biaya')" class="w-full bg-gray-600 hover:bg-gray-700 text-white py-1.5 rounded text-[13px] font-bold"><i class="fas fa-save"></i> Simpan sebagai Default</button>
                             </div>
@@ -904,7 +916,7 @@
 
                                             <!-- BIAYA & PENUTUP -->
                                             <div class="pt-1 leading-relaxed">
-                                                Dengan estimasi total biaya pengurusan sebesar <span id="view-biaya-angka" class="font-bold">Rp. 13.183.500,-</span> ( <span id="view-biaya-huruf" class="italic font-normal">Tiga belas juta seratus delapan puluh tiga ribu lima ratus rupiah</span> )
+                                                Dengan estimasi total biaya pengurusan sebesar <span id="view-biaya-angka" class="font-bold">Rp. 13.183.500,-</span><span id="view-biaya-huruf-wrap"> ( <span id="view-biaya-huruf" class="italic font-normal">Tiga belas juta seratus delapan puluh tiga ribu lima ratus rupiah</span> )</span>
                                             </div>
                                             <p id="view-penutup" class="pt-0.5">demikian surat biaya estimasi pengurusan ini kami buat, atas perhatian dan kerjasamanya kami ucapkan terima kasih.</p>
                                         </div>
@@ -1227,6 +1239,11 @@
             renderPembukaan();
             document.getElementById('view-penutup').innerText = document.getElementById('in-penutup').value;
 
+            // Toggle tampil/sembunyi bagian-bagian opsional surat
+            document.getElementById('view-biaya-huruf-wrap').style.display = document.getElementById('in-tampil-terbilang').checked ? '' : 'none';
+            document.getElementById('view-transisi').style.display = document.getElementById('in-tampil-transisi').checked ? '' : 'none';
+            document.getElementById('tabel-blok-b').style.display = document.getElementById('in-tampil-tabel-b').checked ? '' : 'none';
+
             // Update Footer Manual
             document.getElementById('view-footer-alamat1').innerText = document.getElementById('in-footer-alamat1').value;
             document.getElementById('view-footer-alamat2').innerText = document.getElementById('in-footer-alamat2').value;
@@ -1290,9 +1307,12 @@
                 penutup: document.getElementById('in-penutup').value,
                 rowsA: rowsA,
                 transisi: document.getElementById('in-transisi').value,
+                tampilTransisi: document.getElementById('in-tampil-transisi').checked,
                 rowsB: rowsB,
+                tampilTabelB: document.getElementById('in-tampil-tabel-b').checked,
                 biayaAngka: document.getElementById('in-biaya-angka').value,
                 biayaHuruf: document.getElementById('in-biaya-huruf').value,
+                tampilTerbilang: document.getElementById('in-tampil-terbilang').checked,
                 footerAlamat1: document.getElementById('in-footer-alamat1').value,
                 footerAlamat2: document.getElementById('in-footer-alamat2').value,
                 footerTelp: document.getElementById('in-footer-telp').value,
@@ -1310,8 +1330,11 @@
             document.getElementById('in-pembukaan').value = d.pembukaan || 'Dengan Hormat.\nDengan ini kami lampirkan estimasi biaya pengurusan : ' + (d.perihal || 'MUTASI') + ' dengan data sebagai berikut :';
             document.getElementById('in-penutup').value = d.penutup || 'demikian surat biaya estimasi pengurusan ini kami buat, atas perhatian dan kerjasamanya kami ucapkan terima kasih.';
             document.getElementById('in-transisi').value = d.transisi || '';
+            document.getElementById('in-tampil-transisi').checked = d.tampilTransisi !== false;
             document.getElementById('in-biaya-angka').value = d.biayaAngka || '';
             document.getElementById('in-biaya-huruf').value = d.biayaHuruf || '';
+            document.getElementById('in-tampil-terbilang').checked = d.tampilTerbilang !== false;
+            document.getElementById('in-tampil-tabel-b').checked = d.tampilTabelB !== false;
             document.getElementById('in-footer-alamat1').value = d.footerAlamat1 || '';
             document.getElementById('in-footer-alamat2').value = d.footerAlamat2 || '';
             document.getElementById('in-footer-telp').value = d.footerTelp || '';
