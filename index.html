@@ -748,6 +748,10 @@
                                         <button onclick="updateBiayaHurufOtomatis()" class="bg-gray-500 hover:bg-gray-600 text-white px-2 rounded text-[12px]" title="Buat ulang otomatis dari angka"><i class="fas fa-sync"></i></button>
                                     </div>
                                     <p class="text-[12px] text-gray-400 italic">Terbilang otomatis terisi dari angka di atas — boleh diedit manual kalau mau redaksi lain.</p>
+                                    <label class="flex items-center gap-1.5 text-[12px] text-gray-700 font-medium cursor-pointer select-none">
+                                        <input type="checkbox" id="in-tampil-biaya" checked onchange="renderLive()" class="w-3.5 h-3.5 accent-emerald-600">
+                                        Tampilkan kalimat estimasi biaya ini di surat
+                                    </label>
                                     <label class="flex items-center gap-1.5 text-[12px] text-gray-500 cursor-pointer select-none">
                                         <input type="checkbox" id="in-tampil-terbilang" checked onchange="renderLive()" class="w-3.5 h-3.5 accent-emerald-600">
                                         Tampilkan terbilang ( ... ) di surat
@@ -915,7 +919,7 @@
                                             </table>
 
                                             <!-- BIAYA & PENUTUP -->
-                                            <div class="pt-1 leading-relaxed">
+                                            <div id="view-biaya-blok" class="pt-1 leading-relaxed">
                                                 Dengan estimasi total biaya pengurusan sebesar <span id="view-biaya-angka" class="font-bold">Rp. 13.183.500,-</span><span id="view-biaya-huruf-wrap"> ( <span id="view-biaya-huruf" class="italic font-normal">Tiga belas juta seratus delapan puluh tiga ribu lima ratus rupiah</span> )</span>
                                             </div>
                                             <p id="view-penutup" class="pt-0.5">demikian surat biaya estimasi pengurusan ini kami buat, atas perhatian dan kerjasamanya kami ucapkan terima kasih.</p>
@@ -1240,6 +1244,7 @@
             document.getElementById('view-penutup').innerText = document.getElementById('in-penutup').value;
 
             // Toggle tampil/sembunyi bagian-bagian opsional surat
+            document.getElementById('view-biaya-blok').style.display = document.getElementById('in-tampil-biaya').checked ? '' : 'none';
             document.getElementById('view-biaya-huruf-wrap').style.display = document.getElementById('in-tampil-terbilang').checked ? '' : 'none';
             document.getElementById('view-transisi').style.display = document.getElementById('in-tampil-transisi').checked ? '' : 'none';
             document.getElementById('tabel-blok-b').style.display = document.getElementById('in-tampil-tabel-b').checked ? '' : 'none';
@@ -1312,6 +1317,7 @@
                 tampilTabelB: document.getElementById('in-tampil-tabel-b').checked,
                 biayaAngka: document.getElementById('in-biaya-angka').value,
                 biayaHuruf: document.getElementById('in-biaya-huruf').value,
+                tampilBiaya: document.getElementById('in-tampil-biaya').checked,
                 tampilTerbilang: document.getElementById('in-tampil-terbilang').checked,
                 footerAlamat1: document.getElementById('in-footer-alamat1').value,
                 footerAlamat2: document.getElementById('in-footer-alamat2').value,
@@ -1333,6 +1339,7 @@
             document.getElementById('in-tampil-transisi').checked = d.tampilTransisi !== false;
             document.getElementById('in-biaya-angka').value = d.biayaAngka || '';
             document.getElementById('in-biaya-huruf').value = d.biayaHuruf || '';
+            document.getElementById('in-tampil-biaya').checked = d.tampilBiaya !== false;
             document.getElementById('in-tampil-terbilang').checked = d.tampilTerbilang !== false;
             document.getElementById('in-tampil-tabel-b').checked = d.tampilTabelB !== false;
             document.getElementById('in-footer-alamat1').value = d.footerAlamat1 || '';
