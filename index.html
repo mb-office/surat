@@ -299,7 +299,11 @@
                 visibility: visible !important;
                 position: relative !important;
                 width: 210mm !important;
-                min-height: 297mm !important;
+                /* PENTING: jangan paksa min-height 297mm di sini. Area konten per-halaman saat cetak
+                   sekarang cuma 297mm - 34mm (margin bawah utk footer fixed) = 263mm. Kalau dipaksa
+                   297mm, kotak ini jadi lebih tinggi dari area konten 1 halaman -> otomatis kebawa
+                   ke halaman ke-2 yang isinya cuma footer kosong, walau isi suratnya sendiri pendek. */
+                min-height: 0 !important;
                 height: auto !important;
                 padding: 0 !important;
                 box-shadow: none !important;
